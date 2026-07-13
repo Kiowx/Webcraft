@@ -1,0 +1,26 @@
+{
+  "name": "webcraft-single-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single-world WebCraft multiplayer server",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test tests/gameplay.test.js tests/audio.test.js server/server.test.js",
+    "test:audio": "node --test tests/audio.test.js",
+    "test:gameplay": "node --test tests/gameplay.test.js",
+    "test:server": "node --test server/server.test.js",
+    "test:browser": "playwright test",
+    "test:browser:headed": "playwright test --headed",
+    "test:browser:install": "playwright install chromium",
+    "test:all": "npm test && npm run test:browser"
+  },
+  "engines": {
+    "node": ">=18.14.0"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

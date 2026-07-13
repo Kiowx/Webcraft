@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>WebCraft — 网页版 Minecraft</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    touch-action: none;
+  }
+  #game, #hud {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    display: block;
+  }
+  #hud { cursor: default; }
+  #nickname-input {
+    position: absolute; display: none; z-index: 4; box-sizing: border-box;
+    margin: 0; padding: 0 8px; border: 2px solid #a0a0a0; border-radius: 0;
+    outline: 2px solid #000; background: #080808; color: #fff;
+    text-align: center; line-height: 1; caret-color: #fff;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    touch-action: auto; user-select: text;
+  }
+  #nickname-input:focus { border-color: #fff; }
+  #chat-input {
+    position: absolute; display: none; z-index: 5; box-sizing: border-box;
+    left: 8px; right: 8px; bottom: 42px; width: calc(100% - 16px); height: 30px;
+    margin: 0; padding: 2px 7px; border: 0; border-radius: 0; outline: 0;
+    background: rgba(0,0,0,0.72); color: #fff; caret-color: #fff;
+    font: 16px/26px "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    text-align: left; touch-action: auto; user-select: text;
+  }
+  #sign-editor {
+    position: absolute; display: none; z-index: 6; inset: 0;
+    align-items: center; flex-direction: column; justify-content: center;
+    background: rgba(0,0,0,0.48); color: #fff; touch-action: auto;
+  }
+  #sign-editor-title {
+    margin: 0 0 22px; color: #fff; font-size: 20px; line-height: 1;
+    text-shadow: 2px 2px 0 #3f3f3f;
+  }
+  #sign-board {
+    position: relative; width: min(420px, calc(100vw - 48px)); height: 190px;
+    box-sizing: border-box; padding: 28px 30px;
+    border: 8px solid #654824; outline: 2px solid #2f2111;
+    background: #aa854c; box-shadow: inset 0 5px 0 #c39c60, inset 0 -5px 0 #886334;
+  }
+  #sign-board::after {
+    content: ""; position: absolute; left: calc(50% - 10px); top: 100%;
+    width: 20px; height: 76px; border: 2px solid #654824; border-top: 0;
+    box-sizing: border-box; background: #956f3d;
+  }
+  #sign-input {
+    position: relative; z-index: 1; width: 100%; height: 100%; box-sizing: border-box;
+    margin: 0; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
+    background: transparent; color: #1d1710; caret-color: #1d1710;
+    font: 24px/31px "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    text-align: center; white-space: pre; touch-action: auto; user-select: text;
+  }
+  #sign-done {
+    width: min(400px, calc(100vw - 64px)); height: 44px; margin-top: 104px;
+    border: 2px solid #000; outline: 2px solid #a0a0a0; border-radius: 0;
+    background: #747474; color: #fff; text-shadow: 2px 2px 0 #3f3f3f;
+    font: 18px/36px "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    cursor: pointer;
+  }
+  #sign-done:hover, #sign-done:focus { outline-color: #fff; background: #8282a0; }
+  #nogl {
+    display: none; position: absolute; inset: 0;
+    align-items: center; justify-content: center;
+    color: #fff; background: #223; font-size: 20px; text-align: center;
+  }
+  #selftest-log {
+    display: none; position: absolute; left: 10px; top: 10px; z-index: 99;
+    background: rgba(0,0,0,0.85); color: #0f0; font: 13px/1.5 monospace;
+    padding: 12px 16px; white-space: pre; border-radius: 6px; max-height: 92vh; overflow: auto;
+  }
+  [hidden] { display: none !important; }
+  #touch-controls {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  #touch-look {
+    position: absolute; left: 42%; right: 0; top: 54px; bottom: 72px;
+    pointer-events: auto; touch-action: none;
+  }
+  #touch-joystick {
+    position: absolute; left: max(18px, env(safe-area-inset-left));
+    bottom: max(20px, env(safe-area-inset-bottom)); width: 132px; height: 132px;
+    border: 3px solid rgba(255,255,255,0.56); border-radius: 50%;
+    box-sizing: border-box; background: rgba(0,0,0,0.24); pointer-events: auto;
+  }
+  #touch-stick {
+    position: absolute; left: 39px; top: 39px; width: 48px; height: 48px;
+    border: 3px solid rgba(255,255,255,0.72); border-radius: 50%;
+    box-sizing: border-box; background: rgba(95,95,95,0.72); pointer-events: none;
+    transform: translate3d(0,0,0);
+  }
+  .touch-button {
+    position: absolute; width: 56px; height: 56px; padding: 0;
+    border: 3px solid rgba(255,255,255,0.72); border-radius: 6px;
+    background: rgba(55,55,55,0.72); color: #fff; text-shadow: 2px 2px #222;
+    font: 700 15px/50px "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    text-align: center; pointer-events: auto; touch-action: none;
+    box-shadow: inset 2px 2px rgba(255,255,255,0.22), inset -2px -2px rgba(0,0,0,0.45);
+  }
+  .touch-button.active, .touch-button:active {
+    background: rgba(116,126,158,0.88); border-color: #fff;
+    transform: translateY(1px);
+  }
+  #touch-jump { right: max(22px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); }
+  #touch-attack { right: max(92px, calc(env(safe-area-inset-right) + 70px)); bottom: max(78px, calc(env(safe-area-inset-bottom) + 54px)); }
+  #touch-use { right: max(22px, env(safe-area-inset-right)); bottom: max(102px, calc(env(safe-area-inset-bottom) + 78px)); }
+  #touch-sneak { left: max(158px, calc(env(safe-area-inset-left) + 140px)); bottom: max(24px, env(safe-area-inset-bottom)); width: 50px; height: 46px; line-height: 40px; }
+  #touch-sprint { left: max(158px, calc(env(safe-area-inset-left) + 140px)); bottom: max(80px, calc(env(safe-area-inset-bottom) + 56px)); width: 50px; height: 46px; line-height: 40px; }
+  #touch-inventory, #touch-chat, #touch-pause, #touch-close-ui {
+    top: max(10px, env(safe-area-inset-top)); width: 52px; height: 42px; line-height: 36px;
+  }
+  #touch-inventory { right: max(126px, calc(env(safe-area-inset-right) + 116px)); }
+  #touch-chat { right: max(68px, calc(env(safe-area-inset-right) + 58px)); }
+  #touch-pause { right: max(10px, env(safe-area-inset-right)); }
+  #touch-close-ui { position: absolute; z-index: 8; right: max(10px, env(safe-area-inset-right)); pointer-events: auto; }
+  @media (orientation: portrait) {
+    #touch-look { left: 34%; top: 58px; bottom: 170px; }
+    #touch-joystick { left: max(12px, env(safe-area-inset-left)); bottom: max(34px, env(safe-area-inset-bottom)); width: 116px; height: 116px; }
+    #touch-stick { left: 33px; top: 33px; width: 44px; height: 44px; }
+    #touch-sneak, #touch-sprint { left: max(132px, calc(env(safe-area-inset-left) + 120px)); }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<canvas id="hud"></canvas>
+<div id="touch-controls" hidden>
+  <div id="touch-look" aria-label="滑动转向"></div>
+  <div id="touch-joystick" aria-label="移动摇杆"><div id="touch-stick"></div></div>
+  <button id="touch-jump" class="touch-button" type="button" aria-label="跳跃">跳</button>
+  <button id="touch-attack" class="touch-button" type="button" aria-label="攻击或破坏">攻击</button>
+  <button id="touch-use" class="touch-button" type="button" aria-label="放置或使用">使用</button>
+  <button id="touch-sneak" class="touch-button" type="button" aria-label="切换潜行">蹲</button>
+  <button id="touch-sprint" class="touch-button" type="button" aria-label="切换疾跑">跑</button>
+  <button id="touch-inventory" class="touch-button" type="button" aria-label="打开背包">背包</button>
+  <button id="touch-chat" class="touch-button" type="button" aria-label="打开聊天">聊天</button>
+  <button id="touch-pause" class="touch-button" type="button" aria-label="暂停菜单">暂停</button>
+</div>
+<button id="touch-close-ui" class="touch-button" type="button" aria-label="关闭界面" hidden>关闭</button>
+<input id="nickname-input" type="text" maxlength="16" autocomplete="off" spellcheck="false" aria-label="玩家昵称">
+<input id="chat-input" type="text" maxlength="160" autocomplete="off" spellcheck="false" aria-label="聊天与命令输入">
+<div id="sign-editor" role="dialog" aria-modal="true" aria-labelledby="sign-editor-title">
+  <div id="sign-editor-title">编辑告示牌内容</div>
+  <div id="sign-board"><textarea id="sign-input" rows="4" maxlength="127" autocomplete="off" spellcheck="false" aria-label="告示牌文字"></textarea></div>
+  <button id="sign-done" type="button">完成</button>
+</div>
+<div id="nogl">你的浏览器不支持 WebGL,无法运行 WebCraft。<br>请使用最新版 Chrome / Edge / Firefox。</div>
+<pre id="selftest-log"></pre>
+
+<script src="js/util.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/resource-pack.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/model-loader.js"></script>
+<script src="js/gl.js"></script>
+<script src="js/world.js"></script>
+<script src="js/network.js"></script>
+<script src="js/mesher.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/player.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/craft.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/save.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

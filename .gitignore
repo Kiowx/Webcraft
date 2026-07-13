@@ -1,0 +1,18 @@
+node_modules/
+server/data/world.json
+server/data/world.backup.json
+.tmp-*/
+.agents/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+*.log
+
+# Local Minecraft installation data and Mojang-owned resources are not source code.
+assets/minecraft-1.12.2/client.jar
+assets/minecraft-1.12.2/extracted/
+assets/minecraft-1.12.2/generated/
+assets/audio/minecraft/music/
+assets/audio/minecraft/sfx/

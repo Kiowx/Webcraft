@@ -1,0 +1,1433 @@
+{
+  "ambient.cave": {
+    "vanilla_event": "ambient.cave",
+    "files": [
+      "minecraft/sfx/ambient/cave/cave1.ogg",
+      "minecraft/sfx/ambient/cave/cave2.ogg",
+      "minecraft/sfx/ambient/cave/cave3.ogg",
+      "minecraft/sfx/ambient/cave/cave4.ogg",
+      "minecraft/sfx/ambient/cave/cave5.ogg",
+      "minecraft/sfx/ambient/cave/cave6.ogg",
+      "minecraft/sfx/ambient/cave/cave7.ogg",
+      "minecraft/sfx/ambient/cave/cave8.ogg",
+      "minecraft/sfx/ambient/cave/cave9.ogg",
+      "minecraft/sfx/ambient/cave/cave10.ogg",
+      "minecraft/sfx/ambient/cave/cave11.ogg",
+      "minecraft/sfx/ambient/cave/cave12.ogg"
+    ]
+  },
+  "block.foliage.break": {
+    "vanilla_event": "block.grass.break",
+    "files": [
+      "minecraft/sfx/dig/grass1.ogg",
+      "minecraft/sfx/dig/grass2.ogg",
+      "minecraft/sfx/dig/grass3.ogg",
+      "minecraft/sfx/dig/grass4.ogg"
+    ]
+  },
+  "block.foliage.fall": {
+    "vanilla_event": "block.grass.fall",
+    "files": [
+      "minecraft/sfx/step/grass1.ogg",
+      "minecraft/sfx/step/grass2.ogg",
+      "minecraft/sfx/step/grass3.ogg",
+      "minecraft/sfx/step/grass4.ogg",
+      "minecraft/sfx/step/grass5.ogg",
+      "minecraft/sfx/step/grass6.ogg"
+    ]
+  },
+  "block.foliage.hit": {
+    "vanilla_event": "block.grass.hit",
+    "files": [
+      "minecraft/sfx/step/grass1.ogg",
+      "minecraft/sfx/step/grass2.ogg",
+      "minecraft/sfx/step/grass3.ogg",
+      "minecraft/sfx/step/grass4.ogg",
+      "minecraft/sfx/step/grass5.ogg",
+      "minecraft/sfx/step/grass6.ogg"
+    ]
+  },
+  "block.foliage.place": {
+    "vanilla_event": "block.grass.place",
+    "files": [
+      "minecraft/sfx/dig/grass1.ogg",
+      "minecraft/sfx/dig/grass2.ogg",
+      "minecraft/sfx/dig/grass3.ogg",
+      "minecraft/sfx/dig/grass4.ogg"
+    ]
+  },
+  "block.foliage.step": {
+    "vanilla_event": "block.grass.step",
+    "files": [
+      "minecraft/sfx/step/grass1.ogg",
+      "minecraft/sfx/step/grass2.ogg",
+      "minecraft/sfx/step/grass3.ogg",
+      "minecraft/sfx/step/grass4.ogg",
+      "minecraft/sfx/step/grass5.ogg",
+      "minecraft/sfx/step/grass6.ogg"
+    ]
+  },
+  "block.glass.break": {
+    "vanilla_event": "block.glass.break",
+    "files": [
+      "minecraft/sfx/random/glass1.ogg",
+      "minecraft/sfx/random/glass2.ogg",
+      "minecraft/sfx/random/glass3.ogg"
+    ]
+  },
+  "block.glass.fall": {
+    "vanilla_event": "block.glass.fall",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.glass.hit": {
+    "vanilla_event": "block.glass.hit",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.glass.place": {
+    "vanilla_event": "block.glass.place",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.glass.step": {
+    "vanilla_event": "block.glass.step",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.grass.break": {
+    "vanilla_event": "block.grass.break",
+    "files": [
+      "minecraft/sfx/dig/grass1.ogg",
+      "minecraft/sfx/dig/grass2.ogg",
+      "minecraft/sfx/dig/grass3.ogg",
+      "minecraft/sfx/dig/grass4.ogg"
+    ]
+  },
+  "block.grass.fall": {
+    "vanilla_event": "block.grass.fall",
+    "files": [
+      "minecraft/sfx/step/grass1.ogg",
+      "minecraft/sfx/step/grass2.ogg",
+      "minecraft/sfx/step/grass3.ogg",
+      "minecraft/sfx/step/grass4.ogg",
+      "minecraft/sfx/step/grass5.ogg",
+      "minecraft/sfx/step/grass6.ogg"
+    ]
+  },
+  "block.grass.hit": {
+    "vanilla_event": "block.grass.hit",
+    "files": [
+      "minecraft/sfx/step/grass1.ogg",
+      "minecraft/sfx/step/grass2.ogg",
+      "minecraft/sfx/step/grass3.ogg",
+      "minecraft/sfx/step/grass4.ogg",
+      "minecraft/sfx/step/grass5.ogg",
+      "minecraft/sfx/step/grass6.ogg"
+    ]
+  },
+  "block.grass.place": {
+    "vanilla_event": "block.grass.place",
+    "files": [
+      "minecraft/sfx/dig/grass1.ogg",
+      "minecraft/sfx/dig/grass2.ogg",
+      "minecraft/sfx/dig/grass3.ogg",
+      "minecraft/sfx/dig/grass4.ogg"
+    ]
+  },
+  "block.grass.step": {
+    "vanilla_event": "block.grass.step",
+    "files": [
+      "minecraft/sfx/step/grass1.ogg",
+      "minecraft/sfx/step/grass2.ogg",
+      "minecraft/sfx/step/grass3.ogg",
+      "minecraft/sfx/step/grass4.ogg",
+      "minecraft/sfx/step/grass5.ogg",
+      "minecraft/sfx/step/grass6.ogg"
+    ]
+  },
+  "block.gravel.break": {
+    "vanilla_event": "block.gravel.break",
+    "files": [
+      "minecraft/sfx/dig/gravel1.ogg",
+      "minecraft/sfx/dig/gravel2.ogg",
+      "minecraft/sfx/dig/gravel3.ogg",
+      "minecraft/sfx/dig/gravel4.ogg"
+    ]
+  },
+  "block.gravel.fall": {
+    "vanilla_event": "block.gravel.fall",
+    "files": [
+      "minecraft/sfx/step/gravel1.ogg",
+      "minecraft/sfx/step/gravel2.ogg",
+      "minecraft/sfx/step/gravel3.ogg",
+      "minecraft/sfx/step/gravel4.ogg"
+    ]
+  },
+  "block.gravel.hit": {
+    "vanilla_event": "block.gravel.hit",
+    "files": [
+      "minecraft/sfx/step/gravel1.ogg",
+      "minecraft/sfx/step/gravel2.ogg",
+      "minecraft/sfx/step/gravel3.ogg",
+      "minecraft/sfx/step/gravel4.ogg"
+    ]
+  },
+  "block.gravel.place": {
+    "vanilla_event": "block.gravel.place",
+    "files": [
+      "minecraft/sfx/dig/gravel1.ogg",
+      "minecraft/sfx/dig/gravel2.ogg",
+      "minecraft/sfx/dig/gravel3.ogg",
+      "minecraft/sfx/dig/gravel4.ogg"
+    ]
+  },
+  "block.gravel.step": {
+    "vanilla_event": "block.gravel.step",
+    "files": [
+      "minecraft/sfx/step/gravel1.ogg",
+      "minecraft/sfx/step/gravel2.ogg",
+      "minecraft/sfx/step/gravel3.ogg",
+      "minecraft/sfx/step/gravel4.ogg"
+    ]
+  },
+  "block.ladder.break": {
+    "vanilla_event": "block.ladder.break",
+    "files": [
+      "minecraft/sfx/dig/wood1.ogg",
+      "minecraft/sfx/dig/wood2.ogg",
+      "minecraft/sfx/dig/wood3.ogg",
+      "minecraft/sfx/dig/wood4.ogg"
+    ]
+  },
+  "block.ladder.fall": {
+    "vanilla_event": "block.ladder.fall",
+    "files": [
+      "minecraft/sfx/step/ladder1.ogg",
+      "minecraft/sfx/step/ladder2.ogg",
+      "minecraft/sfx/step/ladder3.ogg",
+      "minecraft/sfx/step/ladder4.ogg",
+      "minecraft/sfx/step/ladder5.ogg"
+    ]
+  },
+  "block.ladder.hit": {
+    "vanilla_event": "block.ladder.hit",
+    "files": [
+      "minecraft/sfx/step/ladder1.ogg",
+      "minecraft/sfx/step/ladder2.ogg",
+      "minecraft/sfx/step/ladder3.ogg",
+      "minecraft/sfx/step/ladder4.ogg",
+      "minecraft/sfx/step/ladder5.ogg"
+    ]
+  },
+  "block.ladder.place": {
+    "vanilla_event": "block.ladder.place",
+    "files": [
+      "minecraft/sfx/dig/wood1.ogg",
+      "minecraft/sfx/dig/wood2.ogg",
+      "minecraft/sfx/dig/wood3.ogg",
+      "minecraft/sfx/dig/wood4.ogg"
+    ]
+  },
+  "block.ladder.step": {
+    "vanilla_event": "block.ladder.step",
+    "files": [
+      "minecraft/sfx/step/ladder1.ogg",
+      "minecraft/sfx/step/ladder2.ogg",
+      "minecraft/sfx/step/ladder3.ogg",
+      "minecraft/sfx/step/ladder4.ogg",
+      "minecraft/sfx/step/ladder5.ogg"
+    ]
+  },
+  "block.metal.break": {
+    "vanilla_event": "block.metal.break",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.metal.fall": {
+    "vanilla_event": "block.metal.fall",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.metal.hit": {
+    "vanilla_event": "block.metal.hit",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.metal.place": {
+    "vanilla_event": "block.metal.place",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.metal.step": {
+    "vanilla_event": "block.metal.step",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.nether.break": {
+    "vanilla_event": "block.stone.break",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.nether.fall": {
+    "vanilla_event": "block.stone.fall",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.nether.hit": {
+    "vanilla_event": "block.stone.hit",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.nether.place": {
+    "vanilla_event": "block.stone.place",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.nether.step": {
+    "vanilla_event": "block.stone.step",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.sand.break": {
+    "vanilla_event": "block.sand.break",
+    "files": [
+      "minecraft/sfx/dig/sand1.ogg",
+      "minecraft/sfx/dig/sand2.ogg",
+      "minecraft/sfx/dig/sand3.ogg",
+      "minecraft/sfx/dig/sand4.ogg"
+    ]
+  },
+  "block.sand.fall": {
+    "vanilla_event": "block.sand.fall",
+    "files": [
+      "minecraft/sfx/step/sand1.ogg",
+      "minecraft/sfx/step/sand2.ogg",
+      "minecraft/sfx/step/sand3.ogg",
+      "minecraft/sfx/step/sand4.ogg",
+      "minecraft/sfx/step/sand5.ogg"
+    ]
+  },
+  "block.sand.hit": {
+    "vanilla_event": "block.sand.hit",
+    "files": [
+      "minecraft/sfx/step/sand1.ogg",
+      "minecraft/sfx/step/sand2.ogg",
+      "minecraft/sfx/step/sand3.ogg",
+      "minecraft/sfx/step/sand4.ogg",
+      "minecraft/sfx/step/sand5.ogg"
+    ]
+  },
+  "block.sand.place": {
+    "vanilla_event": "block.sand.place",
+    "files": [
+      "minecraft/sfx/dig/sand1.ogg",
+      "minecraft/sfx/dig/sand2.ogg",
+      "minecraft/sfx/dig/sand3.ogg",
+      "minecraft/sfx/dig/sand4.ogg"
+    ]
+  },
+  "block.sand.step": {
+    "vanilla_event": "block.sand.step",
+    "files": [
+      "minecraft/sfx/step/sand1.ogg",
+      "minecraft/sfx/step/sand2.ogg",
+      "minecraft/sfx/step/sand3.ogg",
+      "minecraft/sfx/step/sand4.ogg",
+      "minecraft/sfx/step/sand5.ogg"
+    ]
+  },
+  "block.snow.break": {
+    "vanilla_event": "block.snow.break",
+    "files": [
+      "minecraft/sfx/dig/snow1.ogg",
+      "minecraft/sfx/dig/snow2.ogg",
+      "minecraft/sfx/dig/snow3.ogg",
+      "minecraft/sfx/dig/snow4.ogg"
+    ]
+  },
+  "block.snow.fall": {
+    "vanilla_event": "block.snow.fall",
+    "files": [
+      "minecraft/sfx/step/snow1.ogg",
+      "minecraft/sfx/step/snow2.ogg",
+      "minecraft/sfx/step/snow3.ogg",
+      "minecraft/sfx/step/snow4.ogg"
+    ]
+  },
+  "block.snow.hit": {
+    "vanilla_event": "block.snow.hit",
+    "files": [
+      "minecraft/sfx/step/snow1.ogg",
+      "minecraft/sfx/step/snow2.ogg",
+      "minecraft/sfx/step/snow3.ogg",
+      "minecraft/sfx/step/snow4.ogg"
+    ]
+  },
+  "block.snow.place": {
+    "vanilla_event": "block.snow.place",
+    "files": [
+      "minecraft/sfx/dig/snow1.ogg",
+      "minecraft/sfx/dig/snow2.ogg",
+      "minecraft/sfx/dig/snow3.ogg",
+      "minecraft/sfx/dig/snow4.ogg"
+    ]
+  },
+  "block.snow.step": {
+    "vanilla_event": "block.snow.step",
+    "files": [
+      "minecraft/sfx/step/snow1.ogg",
+      "minecraft/sfx/step/snow2.ogg",
+      "minecraft/sfx/step/snow3.ogg",
+      "minecraft/sfx/step/snow4.ogg"
+    ]
+  },
+  "block.soul_sand.break": {
+    "vanilla_event": "block.sand.break",
+    "files": [
+      "minecraft/sfx/dig/sand1.ogg",
+      "minecraft/sfx/dig/sand2.ogg",
+      "minecraft/sfx/dig/sand3.ogg",
+      "minecraft/sfx/dig/sand4.ogg"
+    ]
+  },
+  "block.soul_sand.fall": {
+    "vanilla_event": "block.sand.fall",
+    "files": [
+      "minecraft/sfx/step/sand1.ogg",
+      "minecraft/sfx/step/sand2.ogg",
+      "minecraft/sfx/step/sand3.ogg",
+      "minecraft/sfx/step/sand4.ogg",
+      "minecraft/sfx/step/sand5.ogg"
+    ]
+  },
+  "block.soul_sand.hit": {
+    "vanilla_event": "block.sand.hit",
+    "files": [
+      "minecraft/sfx/step/sand1.ogg",
+      "minecraft/sfx/step/sand2.ogg",
+      "minecraft/sfx/step/sand3.ogg",
+      "minecraft/sfx/step/sand4.ogg",
+      "minecraft/sfx/step/sand5.ogg"
+    ]
+  },
+  "block.soul_sand.place": {
+    "vanilla_event": "block.sand.place",
+    "files": [
+      "minecraft/sfx/dig/sand1.ogg",
+      "minecraft/sfx/dig/sand2.ogg",
+      "minecraft/sfx/dig/sand3.ogg",
+      "minecraft/sfx/dig/sand4.ogg"
+    ]
+  },
+  "block.soul_sand.step": {
+    "vanilla_event": "block.sand.step",
+    "files": [
+      "minecraft/sfx/step/sand1.ogg",
+      "minecraft/sfx/step/sand2.ogg",
+      "minecraft/sfx/step/sand3.ogg",
+      "minecraft/sfx/step/sand4.ogg",
+      "minecraft/sfx/step/sand5.ogg"
+    ]
+  },
+  "block.stone.break": {
+    "vanilla_event": "block.stone.break",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.stone.fall": {
+    "vanilla_event": "block.stone.fall",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.stone.hit": {
+    "vanilla_event": "block.stone.hit",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.stone.place": {
+    "vanilla_event": "block.stone.place",
+    "files": [
+      "minecraft/sfx/dig/stone1.ogg",
+      "minecraft/sfx/dig/stone2.ogg",
+      "minecraft/sfx/dig/stone3.ogg",
+      "minecraft/sfx/dig/stone4.ogg"
+    ]
+  },
+  "block.stone.step": {
+    "vanilla_event": "block.stone.step",
+    "files": [
+      "minecraft/sfx/step/stone1.ogg",
+      "minecraft/sfx/step/stone2.ogg",
+      "minecraft/sfx/step/stone3.ogg",
+      "minecraft/sfx/step/stone4.ogg",
+      "minecraft/sfx/step/stone5.ogg",
+      "minecraft/sfx/step/stone6.ogg"
+    ]
+  },
+  "block.wood.break": {
+    "vanilla_event": "block.wood.break",
+    "files": [
+      "minecraft/sfx/dig/wood1.ogg",
+      "minecraft/sfx/dig/wood2.ogg",
+      "minecraft/sfx/dig/wood3.ogg",
+      "minecraft/sfx/dig/wood4.ogg"
+    ]
+  },
+  "block.wood.fall": {
+    "vanilla_event": "block.wood.fall",
+    "files": [
+      "minecraft/sfx/step/wood1.ogg",
+      "minecraft/sfx/step/wood2.ogg",
+      "minecraft/sfx/step/wood3.ogg",
+      "minecraft/sfx/step/wood4.ogg",
+      "minecraft/sfx/step/wood5.ogg",
+      "minecraft/sfx/step/wood6.ogg"
+    ]
+  },
+  "block.wood.hit": {
+    "vanilla_event": "block.wood.hit",
+    "files": [
+      "minecraft/sfx/step/wood1.ogg",
+      "minecraft/sfx/step/wood2.ogg",
+      "minecraft/sfx/step/wood3.ogg",
+      "minecraft/sfx/step/wood4.ogg",
+      "minecraft/sfx/step/wood5.ogg",
+      "minecraft/sfx/step/wood6.ogg"
+    ]
+  },
+  "block.wood.place": {
+    "vanilla_event": "block.wood.place",
+    "files": [
+      "minecraft/sfx/dig/wood1.ogg",
+      "minecraft/sfx/dig/wood2.ogg",
+      "minecraft/sfx/dig/wood3.ogg",
+      "minecraft/sfx/dig/wood4.ogg"
+    ]
+  },
+  "block.wood.step": {
+    "vanilla_event": "block.wood.step",
+    "files": [
+      "minecraft/sfx/step/wood1.ogg",
+      "minecraft/sfx/step/wood2.ogg",
+      "minecraft/sfx/step/wood3.ogg",
+      "minecraft/sfx/step/wood4.ogg",
+      "minecraft/sfx/step/wood5.ogg",
+      "minecraft/sfx/step/wood6.ogg"
+    ]
+  },
+  "block.wool.break": {
+    "vanilla_event": "block.cloth.break",
+    "files": [
+      "minecraft/sfx/dig/cloth1.ogg",
+      "minecraft/sfx/dig/cloth2.ogg",
+      "minecraft/sfx/dig/cloth3.ogg",
+      "minecraft/sfx/dig/cloth4.ogg"
+    ]
+  },
+  "block.wool.fall": {
+    "vanilla_event": "block.cloth.fall",
+    "files": [
+      "minecraft/sfx/step/cloth1.ogg",
+      "minecraft/sfx/step/cloth2.ogg",
+      "minecraft/sfx/step/cloth3.ogg",
+      "minecraft/sfx/step/cloth4.ogg"
+    ]
+  },
+  "block.wool.hit": {
+    "vanilla_event": "block.cloth.hit",
+    "files": [
+      "minecraft/sfx/step/cloth1.ogg",
+      "minecraft/sfx/step/cloth2.ogg",
+      "minecraft/sfx/step/cloth3.ogg",
+      "minecraft/sfx/step/cloth4.ogg"
+    ]
+  },
+  "block.wool.place": {
+    "vanilla_event": "block.cloth.place",
+    "files": [
+      "minecraft/sfx/dig/cloth1.ogg",
+      "minecraft/sfx/dig/cloth2.ogg",
+      "minecraft/sfx/dig/cloth3.ogg",
+      "minecraft/sfx/dig/cloth4.ogg"
+    ]
+  },
+  "block.wool.step": {
+    "vanilla_event": "block.cloth.step",
+    "files": [
+      "minecraft/sfx/step/cloth1.ogg",
+      "minecraft/sfx/step/cloth2.ogg",
+      "minecraft/sfx/step/cloth3.ogg",
+      "minecraft/sfx/step/cloth4.ogg"
+    ]
+  },
+  "bow.release": {
+    "vanilla_event": "entity.arrow.shoot",
+    "files": [
+      "minecraft/sfx/random/bow.ogg"
+    ]
+  },
+  "combat.block": {
+    "vanilla_event": "item.shield.block",
+    "files": [
+      "minecraft/sfx/item/shield/block1.ogg",
+      "minecraft/sfx/item/shield/block2.ogg",
+      "minecraft/sfx/item/shield/block3.ogg",
+      "minecraft/sfx/item/shield/block4.ogg",
+      "minecraft/sfx/item/shield/block5.ogg"
+    ]
+  },
+  "combat.critical": {
+    "vanilla_event": "entity.player.attack.crit",
+    "files": [
+      "minecraft/sfx/entity/player/attack/crit1.ogg",
+      "minecraft/sfx/entity/player/attack/crit2.ogg",
+      "minecraft/sfx/entity/player/attack/crit3.ogg"
+    ]
+  },
+  "combat.swing": {
+    "vanilla_event": "entity.player.attack.weak",
+    "files": [
+      "minecraft/sfx/entity/player/attack/weak1.ogg",
+      "minecraft/sfx/entity/player/attack/weak2.ogg",
+      "minecraft/sfx/entity/player/attack/weak3.ogg",
+      "minecraft/sfx/entity/player/attack/weak4.ogg"
+    ]
+  },
+  "container.chest.close": {
+    "vanilla_event": "block.chest.close",
+    "files": [
+      "minecraft/sfx/block/chest/close.ogg",
+      "minecraft/sfx/block/chest/close2.ogg",
+      "minecraft/sfx/block/chest/close3.ogg"
+    ]
+  },
+  "container.chest.open": {
+    "vanilla_event": "block.chest.open",
+    "files": [
+      "minecraft/sfx/block/chest/open.ogg"
+    ]
+  },
+  "door.iron.close": {
+    "vanilla_event": "block.iron_door.close",
+    "files": [
+      "minecraft/sfx/block/iron_door/close1.ogg",
+      "minecraft/sfx/block/iron_door/close2.ogg",
+      "minecraft/sfx/block/iron_door/close3.ogg",
+      "minecraft/sfx/block/iron_door/close4.ogg"
+    ]
+  },
+  "door.iron.open": {
+    "vanilla_event": "block.iron_door.open",
+    "files": [
+      "minecraft/sfx/block/iron_door/open1.ogg",
+      "minecraft/sfx/block/iron_door/open2.ogg",
+      "minecraft/sfx/block/iron_door/open3.ogg",
+      "minecraft/sfx/block/iron_door/open4.ogg"
+    ]
+  },
+  "door.wood.close": {
+    "vanilla_event": "block.wooden_door.close",
+    "files": [
+      "minecraft/sfx/block/wooden_door/close.ogg",
+      "minecraft/sfx/block/wooden_door/close2.ogg",
+      "minecraft/sfx/block/wooden_door/close3.ogg",
+      "minecraft/sfx/block/wooden_door/close4.ogg"
+    ]
+  },
+  "door.wood.open": {
+    "vanilla_event": "block.wooden_door.open",
+    "files": [
+      "minecraft/sfx/block/wooden_door/open.ogg",
+      "minecraft/sfx/block/wooden_door/open2.ogg",
+      "minecraft/sfx/block/wooden_door/open3.ogg",
+      "minecraft/sfx/block/wooden_door/open4.ogg"
+    ]
+  },
+  "egg.throw": {
+    "vanilla_event": "entity.egg.throw",
+    "files": [
+      "minecraft/sfx/random/bow.ogg"
+    ]
+  },
+  "entity.bat.ambient": {
+    "vanilla_event": "entity.bat.ambient",
+    "files": [
+      "minecraft/sfx/mob/bat/idle1.ogg",
+      "minecraft/sfx/mob/bat/idle2.ogg",
+      "minecraft/sfx/mob/bat/idle3.ogg",
+      "minecraft/sfx/mob/bat/idle4.ogg"
+    ]
+  },
+  "entity.bat.death": {
+    "vanilla_event": "entity.bat.death",
+    "files": [
+      "minecraft/sfx/mob/bat/death.ogg"
+    ]
+  },
+  "entity.bat.hurt": {
+    "vanilla_event": "entity.bat.hurt",
+    "files": [
+      "minecraft/sfx/mob/bat/hurt1.ogg",
+      "minecraft/sfx/mob/bat/hurt2.ogg",
+      "minecraft/sfx/mob/bat/hurt3.ogg",
+      "minecraft/sfx/mob/bat/hurt4.ogg"
+    ]
+  },
+  "entity.blaze.ambient": {
+    "vanilla_event": "entity.blaze.ambient",
+    "files": [
+      "minecraft/sfx/mob/blaze/breathe1.ogg",
+      "minecraft/sfx/mob/blaze/breathe2.ogg",
+      "minecraft/sfx/mob/blaze/breathe3.ogg",
+      "minecraft/sfx/mob/blaze/breathe4.ogg"
+    ]
+  },
+  "entity.blaze.attack": {
+    "vanilla_event": "entity.blaze.shoot",
+    "files": [
+      "minecraft/sfx/mob/ghast/fireball4.ogg"
+    ]
+  },
+  "entity.blaze.death": {
+    "vanilla_event": "entity.blaze.death",
+    "files": [
+      "minecraft/sfx/mob/blaze/death.ogg"
+    ]
+  },
+  "entity.blaze.hurt": {
+    "vanilla_event": "entity.blaze.hurt",
+    "files": [
+      "minecraft/sfx/mob/blaze/hit1.ogg",
+      "minecraft/sfx/mob/blaze/hit2.ogg",
+      "minecraft/sfx/mob/blaze/hit3.ogg",
+      "minecraft/sfx/mob/blaze/hit4.ogg"
+    ]
+  },
+  "entity.cat.ambient": {
+    "vanilla_event": "entity.cat.ambient",
+    "files": [
+      "minecraft/sfx/mob/cat/meow1.ogg",
+      "minecraft/sfx/mob/cat/meow2.ogg",
+      "minecraft/sfx/mob/cat/meow3.ogg",
+      "minecraft/sfx/mob/cat/meow4.ogg"
+    ]
+  },
+  "entity.cat.death": {
+    "vanilla_event": "entity.cat.death",
+    "files": [
+      "minecraft/sfx/mob/cat/hitt1.ogg",
+      "minecraft/sfx/mob/cat/hitt2.ogg",
+      "minecraft/sfx/mob/cat/hitt3.ogg"
+    ]
+  },
+  "entity.cat.hurt": {
+    "vanilla_event": "entity.cat.hurt",
+    "files": [
+      "minecraft/sfx/mob/cat/hitt1.ogg",
+      "minecraft/sfx/mob/cat/hitt2.ogg",
+      "minecraft/sfx/mob/cat/hitt3.ogg"
+    ]
+  },
+  "entity.chicken.ambient": {
+    "vanilla_event": "entity.chicken.ambient",
+    "files": [
+      "minecraft/sfx/mob/chicken/say1.ogg",
+      "minecraft/sfx/mob/chicken/say2.ogg",
+      "minecraft/sfx/mob/chicken/say3.ogg"
+    ]
+  },
+  "entity.chicken.death": {
+    "vanilla_event": "entity.chicken.death",
+    "files": [
+      "minecraft/sfx/mob/chicken/hurt1.ogg",
+      "minecraft/sfx/mob/chicken/hurt2.ogg"
+    ]
+  },
+  "entity.chicken.hurt": {
+    "vanilla_event": "entity.chicken.hurt",
+    "files": [
+      "minecraft/sfx/mob/chicken/hurt1.ogg",
+      "minecraft/sfx/mob/chicken/hurt2.ogg"
+    ]
+  },
+  "entity.chicken.special": {
+    "vanilla_event": "entity.chicken.egg",
+    "files": [
+      "minecraft/sfx/mob/chicken/plop.ogg"
+    ]
+  },
+  "entity.chicken.step": {
+    "vanilla_event": "entity.chicken.step",
+    "files": [
+      "minecraft/sfx/mob/chicken/step1.ogg",
+      "minecraft/sfx/mob/chicken/step2.ogg"
+    ]
+  },
+  "entity.cow.ambient": {
+    "vanilla_event": "entity.cow.ambient",
+    "files": [
+      "minecraft/sfx/mob/cow/say1.ogg",
+      "minecraft/sfx/mob/cow/say2.ogg",
+      "minecraft/sfx/mob/cow/say3.ogg",
+      "minecraft/sfx/mob/cow/say4.ogg"
+    ]
+  },
+  "entity.cow.death": {
+    "vanilla_event": "entity.cow.death",
+    "files": [
+      "minecraft/sfx/mob/cow/hurt1.ogg",
+      "minecraft/sfx/mob/cow/hurt2.ogg",
+      "minecraft/sfx/mob/cow/hurt3.ogg"
+    ]
+  },
+  "entity.cow.hurt": {
+    "vanilla_event": "entity.cow.hurt",
+    "files": [
+      "minecraft/sfx/mob/cow/hurt1.ogg",
+      "minecraft/sfx/mob/cow/hurt2.ogg",
+      "minecraft/sfx/mob/cow/hurt3.ogg"
+    ]
+  },
+  "entity.cow.step": {
+    "vanilla_event": "entity.cow.step",
+    "files": [
+      "minecraft/sfx/mob/cow/step1.ogg",
+      "minecraft/sfx/mob/cow/step2.ogg",
+      "minecraft/sfx/mob/cow/step3.ogg",
+      "minecraft/sfx/mob/cow/step4.ogg"
+    ]
+  },
+  "entity.creeper.death": {
+    "vanilla_event": "entity.creeper.death",
+    "files": [
+      "minecraft/sfx/mob/creeper/death.ogg"
+    ]
+  },
+  "entity.creeper.hurt": {
+    "vanilla_event": "entity.creeper.hurt",
+    "files": [
+      "minecraft/sfx/mob/creeper/say1.ogg",
+      "minecraft/sfx/mob/creeper/say2.ogg",
+      "minecraft/sfx/mob/creeper/say3.ogg",
+      "minecraft/sfx/mob/creeper/say4.ogg"
+    ]
+  },
+  "entity.ender_dragon.ambient": {
+    "vanilla_event": "entity.enderdragon.ambient",
+    "files": [
+      "minecraft/sfx/mob/enderdragon/growl1.ogg",
+      "minecraft/sfx/mob/enderdragon/growl2.ogg",
+      "minecraft/sfx/mob/enderdragon/growl3.ogg",
+      "minecraft/sfx/mob/enderdragon/growl4.ogg"
+    ]
+  },
+  "entity.ender_dragon.attack": {
+    "vanilla_event": "entity.enderdragon.growl",
+    "files": [
+      "minecraft/sfx/mob/enderdragon/growl1.ogg",
+      "minecraft/sfx/mob/enderdragon/growl2.ogg",
+      "minecraft/sfx/mob/enderdragon/growl3.ogg",
+      "minecraft/sfx/mob/enderdragon/growl4.ogg"
+    ]
+  },
+  "entity.ender_dragon.death": {
+    "vanilla_event": "entity.enderdragon.death",
+    "files": [
+      "minecraft/sfx/mob/enderdragon/end.ogg"
+    ]
+  },
+  "entity.ender_dragon.hurt": {
+    "vanilla_event": "entity.enderdragon.hurt",
+    "files": [
+      "minecraft/sfx/mob/enderdragon/hit1.ogg",
+      "minecraft/sfx/mob/enderdragon/hit2.ogg",
+      "minecraft/sfx/mob/enderdragon/hit3.ogg",
+      "minecraft/sfx/mob/enderdragon/hit4.ogg"
+    ]
+  },
+  "entity.enderman.ambient": {
+    "vanilla_event": "entity.endermen.ambient",
+    "files": [
+      "minecraft/sfx/mob/endermen/idle1.ogg",
+      "minecraft/sfx/mob/endermen/idle2.ogg",
+      "minecraft/sfx/mob/endermen/idle3.ogg",
+      "minecraft/sfx/mob/endermen/idle4.ogg",
+      "minecraft/sfx/mob/endermen/idle5.ogg"
+    ]
+  },
+  "entity.enderman.death": {
+    "vanilla_event": "entity.endermen.death",
+    "files": [
+      "minecraft/sfx/mob/endermen/death.ogg"
+    ]
+  },
+  "entity.enderman.hurt": {
+    "vanilla_event": "entity.endermen.hurt",
+    "files": [
+      "minecraft/sfx/mob/endermen/hit1.ogg",
+      "minecraft/sfx/mob/endermen/hit2.ogg",
+      "minecraft/sfx/mob/endermen/hit3.ogg",
+      "minecraft/sfx/mob/endermen/hit4.ogg"
+    ]
+  },
+  "entity.enderman.special": {
+    "vanilla_event": "entity.endermen.teleport",
+    "files": [
+      "minecraft/sfx/mob/endermen/portal.ogg",
+      "minecraft/sfx/mob/endermen/portal2.ogg"
+    ]
+  },
+  "entity.generic.death": {
+    "vanilla_event": "entity.generic.death",
+    "files": [
+      "minecraft/sfx/damage/hit1.ogg",
+      "minecraft/sfx/damage/hit2.ogg",
+      "minecraft/sfx/damage/hit3.ogg"
+    ]
+  },
+  "entity.generic.hurt": {
+    "vanilla_event": "entity.generic.hurt",
+    "files": [
+      "minecraft/sfx/damage/hit1.ogg",
+      "minecraft/sfx/damage/hit2.ogg",
+      "minecraft/sfx/damage/hit3.ogg"
+    ]
+  },
+  "entity.iron_golem.death": {
+    "vanilla_event": "entity.irongolem.death",
+    "files": [
+      "minecraft/sfx/mob/irongolem/death.ogg"
+    ]
+  },
+  "entity.iron_golem.hurt": {
+    "vanilla_event": "entity.irongolem.hurt",
+    "files": [
+      "minecraft/sfx/mob/irongolem/hit1.ogg",
+      "minecraft/sfx/mob/irongolem/hit2.ogg",
+      "minecraft/sfx/mob/irongolem/hit3.ogg",
+      "minecraft/sfx/mob/irongolem/hit4.ogg"
+    ]
+  },
+  "entity.iron_golem.step": {
+    "vanilla_event": "entity.irongolem.step",
+    "files": [
+      "minecraft/sfx/mob/irongolem/walk1.ogg",
+      "minecraft/sfx/mob/irongolem/walk2.ogg",
+      "minecraft/sfx/mob/irongolem/walk3.ogg",
+      "minecraft/sfx/mob/irongolem/walk4.ogg"
+    ]
+  },
+  "entity.pig.ambient": {
+    "vanilla_event": "entity.pig.ambient",
+    "files": [
+      "minecraft/sfx/mob/pig/say1.ogg",
+      "minecraft/sfx/mob/pig/say2.ogg",
+      "minecraft/sfx/mob/pig/say3.ogg"
+    ]
+  },
+  "entity.pig.death": {
+    "vanilla_event": "entity.pig.death",
+    "files": [
+      "minecraft/sfx/mob/pig/death.ogg"
+    ]
+  },
+  "entity.pig.hurt": {
+    "vanilla_event": "entity.pig.hurt",
+    "files": [
+      "minecraft/sfx/mob/pig/say1.ogg",
+      "minecraft/sfx/mob/pig/say2.ogg",
+      "minecraft/sfx/mob/pig/say3.ogg"
+    ]
+  },
+  "entity.pig.step": {
+    "vanilla_event": "entity.pig.step",
+    "files": [
+      "minecraft/sfx/mob/pig/step1.ogg",
+      "minecraft/sfx/mob/pig/step2.ogg",
+      "minecraft/sfx/mob/pig/step3.ogg",
+      "minecraft/sfx/mob/pig/step4.ogg",
+      "minecraft/sfx/mob/pig/step5.ogg"
+    ]
+  },
+  "entity.sheep.ambient": {
+    "vanilla_event": "entity.sheep.ambient",
+    "files": [
+      "minecraft/sfx/mob/sheep/say1.ogg",
+      "minecraft/sfx/mob/sheep/say2.ogg",
+      "minecraft/sfx/mob/sheep/say3.ogg"
+    ]
+  },
+  "entity.sheep.death": {
+    "vanilla_event": "entity.sheep.death",
+    "files": [
+      "minecraft/sfx/mob/sheep/say1.ogg",
+      "minecraft/sfx/mob/sheep/say2.ogg",
+      "minecraft/sfx/mob/sheep/say3.ogg"
+    ]
+  },
+  "entity.sheep.hurt": {
+    "vanilla_event": "entity.sheep.hurt",
+    "files": [
+      "minecraft/sfx/mob/sheep/say1.ogg",
+      "minecraft/sfx/mob/sheep/say2.ogg",
+      "minecraft/sfx/mob/sheep/say3.ogg"
+    ]
+  },
+  "entity.sheep.special": {
+    "vanilla_event": "entity.sheep.shear",
+    "files": [
+      "minecraft/sfx/mob/sheep/shear.ogg"
+    ]
+  },
+  "entity.sheep.step": {
+    "vanilla_event": "entity.sheep.step",
+    "files": [
+      "minecraft/sfx/mob/sheep/step1.ogg",
+      "minecraft/sfx/mob/sheep/step2.ogg",
+      "minecraft/sfx/mob/sheep/step3.ogg",
+      "minecraft/sfx/mob/sheep/step4.ogg",
+      "minecraft/sfx/mob/sheep/step5.ogg"
+    ]
+  },
+  "entity.skeleton.ambient": {
+    "vanilla_event": "entity.skeleton.ambient",
+    "files": [
+      "minecraft/sfx/mob/skeleton/say1.ogg",
+      "minecraft/sfx/mob/skeleton/say2.ogg",
+      "minecraft/sfx/mob/skeleton/say3.ogg"
+    ]
+  },
+  "entity.skeleton.death": {
+    "vanilla_event": "entity.skeleton.death",
+    "files": [
+      "minecraft/sfx/mob/skeleton/death.ogg"
+    ]
+  },
+  "entity.skeleton.hurt": {
+    "vanilla_event": "entity.skeleton.hurt",
+    "files": [
+      "minecraft/sfx/mob/skeleton/hurt1.ogg",
+      "minecraft/sfx/mob/skeleton/hurt2.ogg",
+      "minecraft/sfx/mob/skeleton/hurt3.ogg",
+      "minecraft/sfx/mob/skeleton/hurt4.ogg"
+    ]
+  },
+  "entity.skeleton.step": {
+    "vanilla_event": "entity.skeleton.step",
+    "files": [
+      "minecraft/sfx/mob/skeleton/step1.ogg",
+      "minecraft/sfx/mob/skeleton/step2.ogg",
+      "minecraft/sfx/mob/skeleton/step3.ogg",
+      "minecraft/sfx/mob/skeleton/step4.ogg"
+    ]
+  },
+  "entity.slime.attack": {
+    "vanilla_event": "entity.slime.attack",
+    "files": [
+      "minecraft/sfx/mob/slime/attack1.ogg",
+      "minecraft/sfx/mob/slime/attack2.ogg"
+    ]
+  },
+  "entity.slime.death": {
+    "vanilla_event": "entity.slime.death",
+    "files": [
+      "minecraft/sfx/mob/slime/big1.ogg",
+      "minecraft/sfx/mob/slime/big2.ogg",
+      "minecraft/sfx/mob/slime/big3.ogg",
+      "minecraft/sfx/mob/slime/big4.ogg"
+    ]
+  },
+  "entity.slime.hurt": {
+    "vanilla_event": "entity.slime.hurt",
+    "files": [
+      "minecraft/sfx/mob/slime/big1.ogg",
+      "minecraft/sfx/mob/slime/big2.ogg",
+      "minecraft/sfx/mob/slime/big3.ogg",
+      "minecraft/sfx/mob/slime/big4.ogg"
+    ]
+  },
+  "entity.spider.ambient": {
+    "vanilla_event": "entity.spider.ambient",
+    "files": [
+      "minecraft/sfx/mob/spider/say1.ogg",
+      "minecraft/sfx/mob/spider/say2.ogg",
+      "minecraft/sfx/mob/spider/say3.ogg",
+      "minecraft/sfx/mob/spider/say4.ogg"
+    ]
+  },
+  "entity.spider.death": {
+    "vanilla_event": "entity.spider.death",
+    "files": [
+      "minecraft/sfx/mob/spider/death.ogg"
+    ]
+  },
+  "entity.spider.hurt": {
+    "vanilla_event": "entity.spider.hurt",
+    "files": [
+      "minecraft/sfx/mob/spider/say1.ogg",
+      "minecraft/sfx/mob/spider/say2.ogg",
+      "minecraft/sfx/mob/spider/say3.ogg",
+      "minecraft/sfx/mob/spider/say4.ogg"
+    ]
+  },
+  "entity.spider.step": {
+    "vanilla_event": "entity.spider.step",
+    "files": [
+      "minecraft/sfx/mob/spider/step1.ogg",
+      "minecraft/sfx/mob/spider/step2.ogg",
+      "minecraft/sfx/mob/spider/step3.ogg",
+      "minecraft/sfx/mob/spider/step4.ogg"
+    ]
+  },
+  "entity.squid.ambient": {
+    "vanilla_event": "entity.squid.ambient",
+    "files": [
+      "minecraft/sfx/entity/squid/ambient1.ogg",
+      "minecraft/sfx/entity/squid/ambient2.ogg",
+      "minecraft/sfx/entity/squid/ambient3.ogg",
+      "minecraft/sfx/entity/squid/ambient4.ogg",
+      "minecraft/sfx/entity/squid/ambient5.ogg"
+    ]
+  },
+  "entity.squid.death": {
+    "vanilla_event": "entity.squid.death",
+    "files": [
+      "minecraft/sfx/entity/squid/death1.ogg",
+      "minecraft/sfx/entity/squid/death2.ogg",
+      "minecraft/sfx/entity/squid/death3.ogg"
+    ]
+  },
+  "entity.squid.hurt": {
+    "vanilla_event": "entity.squid.hurt",
+    "files": [
+      "minecraft/sfx/entity/squid/hurt1.ogg",
+      "minecraft/sfx/entity/squid/hurt2.ogg",
+      "minecraft/sfx/entity/squid/hurt3.ogg",
+      "minecraft/sfx/entity/squid/hurt4.ogg"
+    ]
+  },
+  "entity.villager.ambient": {
+    "vanilla_event": "entity.villager.ambient",
+    "files": [
+      "minecraft/sfx/mob/villager/idle1.ogg",
+      "minecraft/sfx/mob/villager/idle2.ogg",
+      "minecraft/sfx/mob/villager/idle3.ogg"
+    ]
+  },
+  "entity.villager.death": {
+    "vanilla_event": "entity.villager.death",
+    "files": [
+      "minecraft/sfx/mob/villager/death.ogg"
+    ]
+  },
+  "entity.villager.hurt": {
+    "vanilla_event": "entity.villager.hurt",
+    "files": [
+      "minecraft/sfx/mob/villager/hit1.ogg",
+      "minecraft/sfx/mob/villager/hit2.ogg",
+      "minecraft/sfx/mob/villager/hit3.ogg",
+      "minecraft/sfx/mob/villager/hit4.ogg"
+    ]
+  },
+  "entity.wolf.ambient": {
+    "vanilla_event": "entity.wolf.ambient",
+    "files": [
+      "minecraft/sfx/mob/wolf/bark1.ogg",
+      "minecraft/sfx/mob/wolf/bark2.ogg",
+      "minecraft/sfx/mob/wolf/bark3.ogg"
+    ]
+  },
+  "entity.wolf.death": {
+    "vanilla_event": "entity.wolf.death",
+    "files": [
+      "minecraft/sfx/mob/wolf/death.ogg"
+    ]
+  },
+  "entity.wolf.hurt": {
+    "vanilla_event": "entity.wolf.hurt",
+    "files": [
+      "minecraft/sfx/mob/wolf/hurt1.ogg",
+      "minecraft/sfx/mob/wolf/hurt2.ogg",
+      "minecraft/sfx/mob/wolf/hurt3.ogg"
+    ]
+  },
+  "entity.wolf.step": {
+    "vanilla_event": "entity.wolf.step",
+    "files": [
+      "minecraft/sfx/mob/wolf/step1.ogg",
+      "minecraft/sfx/mob/wolf/step2.ogg",
+      "minecraft/sfx/mob/wolf/step3.ogg",
+      "minecraft/sfx/mob/wolf/step4.ogg",
+      "minecraft/sfx/mob/wolf/step5.ogg"
+    ]
+  },
+  "entity.zombie.ambient": {
+    "vanilla_event": "entity.zombie.ambient",
+    "files": [
+      "minecraft/sfx/mob/zombie/say1.ogg",
+      "minecraft/sfx/mob/zombie/say2.ogg",
+      "minecraft/sfx/mob/zombie/say3.ogg"
+    ]
+  },
+  "entity.zombie.death": {
+    "vanilla_event": "entity.zombie.death",
+    "files": [
+      "minecraft/sfx/mob/zombie/death.ogg"
+    ]
+  },
+  "entity.zombie.hurt": {
+    "vanilla_event": "entity.zombie.hurt",
+    "files": [
+      "minecraft/sfx/mob/zombie/hurt1.ogg",
+      "minecraft/sfx/mob/zombie/hurt2.ogg"
+    ]
+  },
+  "entity.zombie.step": {
+    "vanilla_event": "entity.zombie.step",
+    "files": [
+      "minecraft/sfx/mob/zombie/step1.ogg",
+      "minecraft/sfx/mob/zombie/step2.ogg",
+      "minecraft/sfx/mob/zombie/step3.ogg",
+      "minecraft/sfx/mob/zombie/step4.ogg",
+      "minecraft/sfx/mob/zombie/step5.ogg"
+    ]
+  },
+  "experience.pickup": {
+    "vanilla_event": "entity.experience_orb.pickup",
+    "files": [
+      "minecraft/sfx/random/orb.ogg"
+    ]
+  },
+  "explosion": {
+    "vanilla_event": "entity.generic.explode",
+    "files": [
+      "minecraft/sfx/random/explode1.ogg",
+      "minecraft/sfx/random/explode2.ogg",
+      "minecraft/sfx/random/explode3.ogg",
+      "minecraft/sfx/random/explode4.ogg"
+    ]
+  },
+  "fire.ambient": {
+    "vanilla_event": "block.fire.ambient",
+    "files": [
+      "minecraft/sfx/fire/fire.ogg"
+    ]
+  },
+  "fishing.cast": {
+    "vanilla_event": "entity.bobber.throw",
+    "files": [
+      "minecraft/sfx/entity/bobber/castfast.ogg"
+    ]
+  },
+  "fishing.catch": {
+    "vanilla_event": "entity.bobber.splash",
+    "files": [
+      "minecraft/sfx/random/splash.ogg"
+    ]
+  },
+  "fluid.solidify": {
+    "vanilla_event": "block.fire.extinguish",
+    "files": [
+      "minecraft/sfx/random/fizz.ogg"
+    ]
+  },
+  "item.break": {
+    "vanilla_event": "entity.item.break",
+    "files": [
+      "minecraft/sfx/random/break.ogg"
+    ]
+  },
+  "item.pickup": {
+    "vanilla_event": "entity.item.pickup",
+    "files": [
+      "minecraft/sfx/random/pop.ogg"
+    ]
+  },
+  "mechanism.click_off": {
+    "vanilla_event": "block.stone_button.click_off",
+    "files": [
+      "minecraft/sfx/random/click.ogg"
+    ]
+  },
+  "mechanism.click_on": {
+    "vanilla_event": "block.stone_button.click_on",
+    "files": [
+      "minecraft/sfx/random/click.ogg"
+    ]
+  },
+  "player.death": {
+    "vanilla_event": "entity.player.death",
+    "files": [
+      "minecraft/sfx/damage/hit1.ogg",
+      "minecraft/sfx/damage/hit2.ogg",
+      "minecraft/sfx/damage/hit3.ogg"
+    ]
+  },
+  "player.eat_bite": {
+    "vanilla_event": "entity.generic.eat",
+    "files": [
+      "minecraft/sfx/random/eat1.ogg",
+      "minecraft/sfx/random/eat2.ogg",
+      "minecraft/sfx/random/eat3.ogg"
+    ]
+  },
+  "player.eat_finish": {
+    "vanilla_event": "entity.player.burp",
+    "files": [
+      "minecraft/sfx/random/burp.ogg"
+    ]
+  },
+  "player.hurt": {
+    "vanilla_event": "entity.player.hurt",
+    "files": [
+      "minecraft/sfx/damage/hit1.ogg",
+      "minecraft/sfx/damage/hit2.ogg",
+      "minecraft/sfx/damage/hit3.ogg"
+    ]
+  },
+  "player.land": {
+    "vanilla_event": "entity.player.small_fall",
+    "files": [
+      "minecraft/sfx/damage/fallsmall.ogg"
+    ]
+  },
+  "player.land_heavy": {
+    "vanilla_event": "entity.player.big_fall",
+    "files": [
+      "minecraft/sfx/damage/fallbig.ogg"
+    ]
+  },
+  "player.swim": {
+    "vanilla_event": "entity.player.swim",
+    "files": [
+      "minecraft/sfx/liquid/swim1.ogg",
+      "minecraft/sfx/liquid/swim2.ogg",
+      "minecraft/sfx/liquid/swim3.ogg",
+      "minecraft/sfx/liquid/swim4.ogg"
+    ]
+  },
+  "tnt.fuse": {
+    "vanilla_event": "entity.tnt.primed",
+    "files": [
+      "minecraft/sfx/random/fuse.ogg"
+    ]
+  },
+  "trade.complete": {
+    "vanilla_event": "entity.villager.yes",
+    "files": [
+      "minecraft/sfx/mob/villager/yes1.ogg",
+      "minecraft/sfx/mob/villager/yes2.ogg",
+      "minecraft/sfx/mob/villager/yes3.ogg"
+    ]
+  },
+  "ui.button.click": {
+    "vanilla_event": "ui.button.click",
+    "files": [
+      "minecraft/sfx/random/click.ogg"
+    ]
+  },
+  "ui.slider.tick": {
+    "vanilla_event": "ui.button.click",
+    "files": [
+      "minecraft/sfx/random/click.ogg"
+    ]
+  },
+  "water.splash": {
+    "vanilla_event": "entity.player.splash",
+    "files": [
+      "minecraft/sfx/liquid/splash.ogg",
+      "minecraft/sfx/liquid/splash2.ogg"
+    ]
+  }
+}
