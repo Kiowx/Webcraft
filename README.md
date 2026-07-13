@@ -2,6 +2,8 @@
 
 <img width="2559" height="1198" alt="QQ_1783953151560" src="https://github.com/user-attachments/assets/87da819f-27e4-4519-8906-7620d30bfe79" />
 
+在线版演示：https://po.cxs.lat
+
 ## 单机运行
 
 可直接打开 `index.html`。单机世界保存在浏览器本地存储中。
