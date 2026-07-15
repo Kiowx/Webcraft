@@ -9,6 +9,12 @@
   const DIR_Z = new Int8Array([0, 0, 0, 0, 1, -1]);
   const VILLAGE_REGION = 128;
   const VILLAGE_RADIUS = 48;
+  const STRUCTURE_SALT = Object.freeze({
+    village: 10387312,
+    temple: 14357617,
+    fortress: 30084232,
+    stronghold: 0x5F3759DF,
+  });
   const TREE_CHANCE = Object.freeze({
     forest: 1 / 28,
     plains: 1 / 768,
@@ -18,10 +24,10 @@
   const VILLAGE_TEMPLATES = Object.freeze({
     house_small: { w: 7, d: 7, beds: [[2, 2]], door: [3, 6] },
     house_large: { w: 9, d: 7, beds: [[2, 2], [6, 2]], door: [4, 6] },
-    farm: { w: 9, d: 9, beds: [], door: [4, 8], job: { profession: 'farmer', block: 'COMPOSTER', at: [7, 4] } },
-    library: { w: 9, d: 7, beds: [[2, 2]], door: [4, 6], job: { profession: 'librarian', block: 'LECTERN', at: [6, 2] } },
-    smithy: { w: 9, d: 7, beds: [[2, 2]], door: [4, 6], job: { profession: 'toolsmith', block: 'SMITHING_TABLE', at: [6, 2] } },
-    butcher: { w: 7, d: 7, beds: [[2, 2]], door: [3, 6], job: { profession: 'butcher', block: 'SMOKER', at: [4, 2] } },
+    farm: { w: 9, d: 9, beds: [], door: [4, 8], job: { profession: 'farmer', block: 'CRAFTING', at: [7, 4] } },
+    library: { w: 9, d: 7, beds: [[2, 2]], door: [4, 6], job: { profession: 'librarian', block: 'BOOKSHELF', at: [6, 2] } },
+    smithy: { w: 9, d: 7, beds: [[2, 2]], door: [4, 6], job: { profession: 'toolsmith', block: 'ANVIL', at: [6, 2] } },
+    butcher: { w: 7, d: 7, beds: [[2, 2]], door: [3, 6], job: { profession: 'butcher', block: 'FURNACE', at: [4, 2] } },
     church: { w: 7, d: 9, beds: [[2, 2]], door: [3, 8], job: { profession: 'cleric', block: 'BREWING_STAND', at: [4, 3] } },
   });
 
@@ -191,6 +197,7 @@
       this.nRavine = Noise.fbm2(Noise.make2D(S ^ 0x9000), 2);
       this.nRavineY = Noise.fbm2(Noise.make2D(S ^ 0xA000), 2);
       this._hcache = new Map();
+      this._strongholdChunks = null;
       this.onChunkLight = null;      // cb(chunk) when light touched (mark remesh)
     }
 
@@ -218,6 +225,19 @@
     random() { return this.rng.next(); }
     getRngState() { return this.rng.getState(); }
     setRngState(state) { if (state !== undefined) this.rng.setState(state); }
+
+    _regionRandom(rx, rz, salt) {
+      return Noise.javaRandom(Noise.javaStructureSeed(this.seed, rx, rz, salt));
+    }
+    _structureCandidate(cx, cz, spacing, separation, salt, triangular) {
+      const rx = Math.floor(cx / spacing), rz = Math.floor(cz / spacing);
+      const random = this._regionRandom(rx, rz, salt);
+      const spread = Math.max(1, spacing - separation);
+      const offset = () => triangular
+        ? ((random.nextInt(spread) + random.nextInt(spread)) >> 1)
+        : random.nextInt(spread);
+      return cx === rx * spacing + offset() && cz === rz * spacing + offset();
+    }
 
     markSectionDirty(ch, section) {
       if (!ch || section < 0 || section >= SEC_N) return;
@@ -372,8 +392,9 @@
     villagePlanForRegion(rx, rz) {
       const key = rx + ',' + rz;
       if (this._villagePlans.has(key)) return this._villagePlans.get(key);
-      const random = U.rng(U.hash32(this.seed + ':village:' + rx + ':' + rz));
-      if (random() > 0.78) { this._villagePlans.set(key, null); return null; }
+      const javaRandom = this._regionRandom(rx, rz, STRUCTURE_SALT.village);
+      if (javaRandom.nextInt(5) !== 0) { this._villagePlans.set(key, null); return null; }
+      const random = () => javaRandom.nextDouble();
       const margin = 32;
       const centerX = rx * VILLAGE_REGION + margin + Math.floor(random() * (VILLAGE_REGION - margin * 2));
       const centerZ = rz * VILLAGE_REGION + margin + Math.floor(random() * (VILLAGE_REGION - margin * 2));
@@ -441,7 +462,7 @@
           roads.push({ x0: door.x, x1: door.x, z0: Math.min(door.z, centerZ), z1: Math.max(door.z, centerZ) });
         }
       }
-      const meeting = { x: centerX + 3, y: centerY + 1, z: centerZ, type: 'meeting', block: Blocks.ID.BELL };
+      const meeting = { x: centerX + 3, y: centerY + 1, z: centerZ, type: 'meeting', block: Blocks.ID.TORCH };
       const pois = [meeting];
       const beds = [], jobs = [];
       for (const building of buildings) {
@@ -590,7 +611,7 @@
         for (let dy = 2; dy <= 4; dy++) this._villagePut(ch, plan.x + dx, y + dy, plan.z + dz, plan.palette.pillar);
       }
       for (let dx = -3; dx <= 2; dx++) for (let dz = -3; dz <= 2; dz++) this._villagePut(ch, plan.x + dx, y + 5, plan.z + dz, plan.palette.roof);
-      this._villagePut(ch, plan.meeting.x, plan.meeting.y, plan.meeting.z, ID.BELL);
+      this._villagePut(ch, plan.meeting.x, plan.meeting.y, plan.meeting.z, ID.TORCH);
     }
 
     _villageLoot(plan, building, kind) {
@@ -665,7 +686,7 @@
           this._villageLocalPut(ch, building, u, 1, v, ID.WHEAT_CROP, stage);
         }
       }
-      this._villageLocalPut(ch, building, 7, 1, 4, ID.COMPOSTER);
+      this._villageLocalPut(ch, building, 7, 1, 4, ID.CRAFTING);
     }
 
     stampVillage(ch) {
@@ -729,8 +750,10 @@
     }
 
     stampNetherFortress(ch) {
-      const random = U.rng(U.hash32(this.seed + ':fortress:' + ch.cx + ':' + ch.cz));
-      if (random() > 0.045) return;
+      const localCX = ch.cx - (NETHER_OFFSET >> 4);
+      if (!this._structureCandidate(localCX, ch.cz, 16, 4, STRUCTURE_SALT.fortress, true)) return;
+      const javaRandom = this._regionRandom(localCX, ch.cz, STRUCTURE_SALT.fortress + 1);
+      const random = () => javaRandom.nextDouble();
       const ID = Blocks.ID;
       const y = 48 + Math.floor(random() * 28);
       for (let lx = 1; lx < 15; lx++) for (let lz = 5; lz <= 10; lz++) {
@@ -1045,8 +1068,9 @@
     }
 
     stampDesertTemple(ch) {
-      const random = U.rng(U.hash32(this.seed + ':desert_temple:' + ch.cx + ':' + ch.cz));
-      if (random() > 0.018) return;
+      if (!this._structureCandidate(ch.cx, ch.cz, 32, 8, STRUCTURE_SALT.temple, false)) return;
+      const javaRandom = this._regionRandom(ch.cx, ch.cz, STRUCTURE_SALT.temple + 1);
+      const random = () => javaRandom.nextDouble();
       const wx = ch.cx * 16 + 8, wz = ch.cz * 16 + 8;
       if (this.biomeAt(wx, wz) !== 'desert') return;
       const ID = Blocks.ID, y = this.genHeight(wx, wz);
@@ -1065,9 +1089,34 @@
       this.setBE(wx, y - 6, wz - 1, { type: 'chest', slots });
     }
 
+    _strongholdCandidateChunks() {
+      if (this._strongholdChunks) return this._strongholdChunks;
+      const random = Noise.javaRandom(Noise.javaStructureSeed(this.seed, 0, 0, STRUCTURE_SALT.stronghold));
+      const chunks = new Set();
+      let angle = random.nextDouble() * Math.PI * 2;
+      let ring = 0, inRing = 0, spread = 3;
+      for (let index = 0; index < 24; index++) {
+        const distance = 96 + ring * 64 + (random.nextDouble() - 0.5) * 32;
+        const cx = Math.round(Math.cos(angle) * distance);
+        const cz = Math.round(Math.sin(angle) * distance);
+        chunks.add(cx + ',' + cz);
+        angle += Math.PI * 2 / spread;
+        inRing++;
+        if (inRing === spread) {
+          ring++;
+          inRing = 0;
+          spread += 2 + Math.floor(spread / (ring + 1));
+          angle += random.nextDouble() * Math.PI * 2;
+        }
+      }
+      this._strongholdChunks = chunks;
+      return chunks;
+    }
+
     stampStronghold(ch) {
-      const random = U.rng(U.hash32(this.seed + ':stronghold:' + ch.cx + ':' + ch.cz));
-      if (random() > 0.008) return;
+      if (!this._strongholdCandidateChunks().has(ch.key)) return;
+      const javaRandom = this._regionRandom(ch.cx, ch.cz, STRUCTURE_SALT.stronghold + 1);
+      const random = () => javaRandom.nextDouble();
       const ID = Blocks.ID, y = 25 + Math.floor(random() * 12), cx = 8, cz = 8;
       for (let dx = -6; dx <= 6; dx++) for (let dz = -6; dz <= 6; dz++) for (let dy = 0; dy <= 5; dy++) {
         const boundary = Math.abs(dx) === 6 || Math.abs(dz) === 6 || dy === 0 || dy === 5;

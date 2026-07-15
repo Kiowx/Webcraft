@@ -13,8 +13,9 @@
   let playerListVisible = false;
   const chatMessages = [];
   let game = null;          // set by main
-  let win = null;           // current window: null | {type:'inventory'|'crafting'|'furnace'|'chest', ...}
+  let win = null;           // current inventory, crafting, container, sign, or station window
   let toastMsg = null, toastT = 0;
+  let advancementMsg = null, advancementT = 0;
   let hitT = 0, criticalHit = false;
   let GUI = 2;
   let S = 36;               // 18px vanilla slot scaled by GUI
@@ -471,9 +472,9 @@
 
   function buildContainerAtlas() {
     containerAtlas = document.createElement('canvas');
-    containerAtlas.width = 176; containerAtlas.height = 168 * 5;
+    containerAtlas.width = 176; containerAtlas.height = 168 * 6;
     const c = containerAtlas.getContext('2d');
-    const kinds = ['inventory', 'crafting', 'furnace', 'chest', 'creative'];
+    const kinds = ['inventory', 'crafting', 'furnace', 'chest', 'creative', 'station'];
     const panel = (oy, kind) => {
       c.fillStyle = '#c6c6c6'; c.fillRect(0, oy, 176, 168);
       c.fillStyle = '#f5f5f5'; c.fillRect(0, oy, 176, 2); c.fillRect(0, oy, 2, 168);
@@ -749,8 +750,8 @@
     ];
     if (screen === 'pause') return [
       full('resume', '返回游戏', 48),
-      menuControl(f, 'achievements', '成就', 60, 74, 98, { disabled: true }),
-      menuControl(f, 'statistics', '统计信息', 162, 74, 98, { disabled: true }),
+      menuControl(f, 'advancements', '进度', 60, 74, 98),
+      menuControl(f, 'statistics', '统计信息', 162, 74, 98),
       full('open_lan', '对局域网开放', 100, { disabled: true }),
       full('options', '选项...', 126),
       full('save_quit', game.multiplayer ? '断开连接并返回标题画面' : '保存并退回到标题画面', 164),
@@ -784,6 +785,7 @@
       full('auto_jump', '自动跳跃：' + (game.autoJump ? '开' : '关'), 128),
       full('done', '完成', 194),
     ];
+    if (screen === 'advancements' || screen === 'statistics') return [full('done', '完成', 194)];
     if (screen === 'skin') {
       const profiles = Textures.skinProfiles ? Textures.skinProfiles() : [{ id: 'steve', name: 'Steve' }];
       const profile = profiles.find(entry => entry.id === game.playerSkin) || profiles[0];
@@ -1040,6 +1042,13 @@
     centerMouse();
     document.exitPointerLock && document.exitPointerLock();
   };
+  UI.openStation = function (station, x, y, z) {
+    if (station !== 'enchant' && station !== 'repair' && station !== 'brew') return false;
+    win = { type: 'station', station, x, y, z };
+    centerMouse();
+    document.exitPointerLock && document.exitPointerLock();
+    return true;
+  };
   UI.close = function () {
     if (chatOpen) { UI.closeChat(); return; }
     if (!win) return;
@@ -1158,7 +1167,7 @@
   }
 
   // ---------------- slot layout ----------------
-  // returns array of {x,y,kind,idx} — kind: inv|armor|craft|result|fin|ffuel|fout|chest
+  // returns array of {x,y,kind,idx} — kind: inv|armor|offhand|craft|result|fin|ffuel|fout|chest
   function panelRect(w, h) {
     const ph = (win && win.type === 'chest' ? 168 : 166) * GUI;
     return { x: Math.round(w / 2 - 88 * GUI), y: Math.round(h / 2 - ph / 2), w: 176 * GUI, h: ph };
@@ -1191,6 +1200,7 @@
       for (let i = 0; i < 4; i++) {
         slots.push({ x: p.x + 8 * GUI, y: p.y + (8 + i * 18) * GUI, kind: 'armor', idx: i });
       }
+      slots.push({ x: p.x + 77 * GUI, y: p.y + 62 * GUI, kind: 'offhand', idx: 0 });
       for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
         slots.push({ x: p.x + (88 + c * 18) * GUI, y: p.y + (26 + r * 18) * GUI, kind: 'craft', idx: r * 2 + c });
       }
@@ -1229,6 +1239,7 @@
     const p = game.player;
     if (sl.kind === 'inv') return p.inv[sl.idx];
     if (sl.kind === 'armor') return p.equipment[sl.idx];
+    if (sl.kind === 'offhand') return p.offhand;
     if (sl.kind === 'craft') return win.craft[sl.idx];
     if (sl.kind === 'result') return win.result;
     if (sl.kind === 'fin' || sl.kind === 'ffuel' || sl.kind === 'fout') return win.be.slots[sl.idx];
@@ -1243,6 +1254,7 @@
     const p = game.player;
     if (sl.kind === 'inv') p.inv[sl.idx] = v;
     else if (sl.kind === 'armor') { p.equipment[sl.idx] = v; p.updateArmorValue(); }
+    else if (sl.kind === 'offhand') p.offhand = v;
     else if (sl.kind === 'craft') win.craft[sl.idx] = v;
     else if (sl.kind === 'fin' || sl.kind === 'ffuel' || sl.kind === 'fout') win.be.slots[sl.idx] = v;
     else if (sl.kind === 'chest') win.be.slots[sl.idx] = v;
@@ -1272,6 +1284,11 @@
 
   function copyStack(s, n) {
     return Items.cloneStack(s, n === undefined ? s.n : n);
+  }
+
+  function stationActionRect(w, h) {
+    const p = panelRect(w, h);
+    return { x: p.x + 55 * GUI, y: p.y + 31 * GUI, w: 108 * GUI, h: 22 * GUI };
   }
 
   function beginNetworkCraft(shift) {
@@ -1367,6 +1384,8 @@
       if (capacityInArray(made, p.inv, order) < made.n) return;
       if (!beginNetworkCraft(true)) return;
       transferToArray(made, p.inv, order);
+      if (p.addStat) p.addStat('itemsCrafted', made.n);
+      if (made.id === Blocks.ID.CRAFTING && p.unlockAdvancement) p.unlockAdvancement('craft_item');
       Craft.consume(win.craft); refreshCraftResult(); Sound.play('pop', 0.7, 1);
       return;
     }
@@ -1381,6 +1400,11 @@
         p.updateArmorValue();
         playSlotSound(0.5);
         return;
+      } else if (win.type === 'inventory' && sourceItem && sourceItem.shield && !p.offhand) {
+        p.offhand = source;
+        p.inv[sl.idx] = null;
+        playSlotSound(0.5);
+        return;
       } else if (win.type === 'chest') {
         transferToArray(source, win.be.slots, Array.from({ length: 27 }, (_, i) => i));
       } else if (win.type === 'furnace' && Items.SMELT[source.id]) {
@@ -1390,7 +1414,7 @@
       } else {
         transferToArray(source, p.inv, sl.idx < 9 ? Array.from({ length: 27 }, (_, i) => i + 9) : Array.from({ length: 9 }, (_, i) => i));
       }
-    } else if (sl.kind === 'armor') {
+    } else if (sl.kind === 'armor' || sl.kind === 'offhand') {
       transferToArray(source, p.inv, inventoryOrder(true));
       if (source.n <= 0) setSlotStack(sl, null);
       if (source.n !== sourceCountBefore) playSlotSound();
@@ -1499,7 +1523,7 @@
         return false;
       }
       let sent = false;
-      if (origin && (origin.kind === 'inv' || origin.kind === 'armor')) {
+      if (origin && (origin.kind === 'inv' || origin.kind === 'armor' || origin.kind === 'offhand')) {
         sent = Network.dropInventorySlot(origin.kind, origin.idx, count, cursor);
       } else {
         Network.syncProfile(p);
@@ -1508,7 +1532,7 @@
       if (!sent) return false;
     } else {
       const restoreOrigin = button === 2 && origin && origin.stack &&
-        (origin.kind === 'inv' || origin.kind === 'armor');
+        (origin.kind === 'inv' || origin.kind === 'armor' || origin.kind === 'offhand');
       const dropped = restoreOrigin ? copyStack(origin.stack, 1) : copyStack(cursor, count);
       const direction = p.lookDir();
       Entities.spawnItem(p.x + direction[0] * 0.8, p.y + p.eye - 0.3, p.z + direction[2] * 0.8,
@@ -1529,6 +1553,16 @@
 
   function onWindowClick(button, shift) {
     const p = game.player;
+    if (win && win.type === 'station') {
+      const action = stationActionRect(hud.width, hud.height);
+      if (mouseX >= action.x && mouseX < action.x + action.w && mouseY >= action.y && mouseY < action.y + action.h) {
+        if (p.cursor) { UI.toast('请先放下鼠标上的物品'); return; }
+        const method = win.station === 'enchant' ? 'enchantHeld' : win.station === 'repair' ? 'repairHeld' : 'brewHeld';
+        const submitted = p[method](win.x, win.y, win.z);
+        if (submitted !== false) p.beginHandAction('use', 0.28);
+        return;
+      }
+    }
     const target = slotAt(mouseX, mouseY);
     if (!target) {
       if (p.cursor && outsidePanel(mouseX, mouseY)) dropCursorOutside(button, null);
@@ -1573,6 +1607,8 @@
       else {
         p.cursor = Items.makeStack(win.result.id, win.result.n);
       }
+      if (p.addStat) p.addStat('itemsCrafted', win.result.n);
+      if (win.result.id === Blocks.ID.CRAFTING && p.unlockAdvancement) p.unlockAdvancement('craft_item');
       cursorOrigin = null;
       Craft.consume(win.craft);
       refreshCraftResult();
@@ -1619,7 +1655,7 @@
         if (st.n <= 0) setSlotStack(target, null);
       }
     }
-    if (!cur && st && p.cursor && (target.kind === 'inv' || target.kind === 'armor')) {
+    if (!cur && st && p.cursor && (target.kind === 'inv' || target.kind === 'armor' || target.kind === 'offhand')) {
       cursorOrigin = { kind: target.kind, idx: target.idx, id: p.cursor.id, stack: sourceBefore };
     } else if (cur) {
       cursorOrigin = null;
@@ -1914,6 +1950,7 @@
     if (win) drawWindow(w, h);
     if (game.paused && !win) drawMenuScreen(w, h);
     drawToast(w, h, dt);
+    drawAdvancement(w, dt);
     if (!win) drawPickup(w, h);
     if (game.showDebug) drawDebug(w, h);
   };
@@ -2398,7 +2435,8 @@
     hctx.fillRect(0, 0, w, h);
     const p = panelRect(w, h);
     drawContainerBackground(win.type, p);
-    const titles = { inventory: '物品栏', crafting: '工作台', furnace: '熔炉', chest: '箱子', creative: '创造模式物品栏' };
+    const titles = { inventory: '物品栏', crafting: '工作台', furnace: '熔炉', chest: '箱子', creative: '创造模式物品栏', station: '' };
+    if (win.type === 'station') titles.station = { enchant: '附魔台', repair: '铁砧', brew: '酿造台' }[win.station] || '工作站';
     if (win.type !== 'inventory') drawPixelText(titles[win.type] || '', p.x + 8 * GUI, p.y + 12 * GUI, 7 * GUI, 'left', '#404040');
     if (win.type !== 'inventory' && win.type !== 'creative') drawPixelText('物品栏', p.x + 8 * GUI, p.y + 80 * GUI, 6 * GUI, 'left', '#404040');
     if (win.type === 'creative') {
@@ -2409,6 +2447,16 @@
     if (win.type === 'inventory') {
       drawPlayerPreview3D(p);
       drawPixelText('合成', p.x + 88 * GUI, p.y + 20 * GUI, 6 * GUI, 'left', '#404040');
+    }
+    if (win.type === 'station') {
+      const action = stationActionRect(w, h);
+      const held = game.player.held();
+      const hovered = mouseX >= action.x && mouseX < action.x + action.w && mouseY >= action.y && mouseY < action.y + action.h;
+      drawSlot(p.x + 17 * GUI, p.y + 31 * GUI, false);
+      drawItemIcon(p.x + 18 * GUI, p.y + 32 * GUI, 16 * GUI, held);
+      drawPixelText(held ? (Items.get(held.id) || {}).name || '' : '空手', p.x + 38 * GUI, p.y + 25 * GUI, 6 * GUI, 'left', '#555');
+      const labels = { enchant: '消耗经验与青金石', repair: '消耗经验与修复材料', brew: '开始酿造' };
+      drawButton({ x: action.x, y: action.y, w: action.w, h: action.h, label: labels[win.station] || '确认' }, hovered);
     }
 
     const slots = layoutSlots(w, h);
@@ -2508,18 +2556,21 @@
 
     if (screen === 'title') {
       drawPixelText('WEBCRAFT', w / 2, frame.y + 48 * GUI, 20 * GUI, 'center', '#f4f4f4', 1, true);
-      drawPixelText('Java 1.8.9 风格', w / 2 + 54 * GUI, frame.y + 65 * GUI, 6 * GUI, 'center', '#ffff55');
+      drawPixelText('Java 1.12.2 风格', w / 2 + 54 * GUI, frame.y + 65 * GUI, 6 * GUI, 'center', '#ffff55');
       drawPixelText('WebCraft v3', 4 * GUI, h - 5 * GUI, 5 * GUI, 'left', '#aaa');
     } else {
       const titles = {
         worlds: '选择世界', multiplayer: '多人游戏', pause: '游戏菜单', options: '选项', video: '视频设置', skin: '皮肤自定义',
         controls: '控制', sound: '音乐和声音', language: '语言', resource: '资源包',
+        advancements: '进度', statistics: '统计信息',
         confirm_delete: '删除世界？',
       };
       drawPixelText(titles[screen] || '', w / 2, frame.y + 24 * GUI, 10 * GUI, 'center', '#fff', 1, true);
       if (screen === 'confirm_delete') {
         drawPixelText('这个世界将永久丢失！', w / 2, frame.y + 82 * GUI, 7 * GUI, 'center', '#fff');
       }
+      if (screen === 'advancements') drawAdvancementScreen(frame);
+      if (screen === 'statistics') drawStatisticsScreen(frame);
     }
     drawScreenControls(screen, w, h);
   }
@@ -2592,6 +2643,7 @@
   };
 
   UI.toast = function (msg) { toastMsg = msg; toastT = 2.6; };
+  UI.advancement = function (msg) { advancementMsg = String(msg || ''); advancementT = 4.5; };
   UI.hit = function (critical) { hitT = 0.16; criticalHit = !!critical; };
   UI.itemPicked = function (msg) { pickupMsg = String(msg || ''); pickupT = 1.2; };
   function drawToast(w, h, dt) {
@@ -2604,6 +2656,51 @@
     hctx.fillStyle = 'rgba(0,0,0,' + 0.65 * a + ')';
     hctx.fillRect(w / 2 - tw / 2, h * 0.22 - 10 * GUI, tw, 12 * GUI);
     drawPixelText(toastMsg, w / 2, h * 0.22 - 2 * GUI, 7 * GUI, 'center', '#fff', a);
+  }
+
+  function drawAdvancement(w, dt) {
+    if (!advancementMsg) return;
+    advancementT -= dt;
+    if (advancementT <= 0) { advancementMsg = null; return; }
+    const width = 150 * GUI, height = 34 * GUI;
+    const slide = U.smoothstep(U.clamp((4.5 - advancementT) / 0.35, 0, 1)) * U.smoothstep(U.clamp(advancementT / 0.35, 0, 1));
+    const x = w - width * slide;
+    hctx.fillStyle = 'rgba(20,20,20,0.94)'; hctx.fillRect(x, 8 * GUI, width, height);
+    hctx.strokeStyle = '#806c42'; hctx.lineWidth = GUI; hctx.strokeRect(x + GUI / 2, 8.5 * GUI, width - GUI, height - GUI);
+    drawPixelText('已达成进度！', x + 8 * GUI, 20 * GUI, 6 * GUI, 'left', '#ffff55');
+    drawPixelText(advancementMsg, x + 8 * GUI, 34 * GUI, 7 * GUI, 'left', '#fff');
+  }
+
+  function drawAdvancementScreen(frame) {
+    const completed = game.player && game.player.advancements ? game.player.advancements : {};
+    const entries = [
+      ['mine_block', '石器时代', '破坏任意方块'],
+      ['craft_item', '工作台制作者', '完成一次合成'],
+      ['kill_mob', '怪物猎人', '击败一只生物'],
+    ];
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index], y = frame.y + (60 + index * 38) * GUI;
+      hctx.fillStyle = completed[entry[0]] ? '#4d7d35' : '#363636'; hctx.fillRect(frame.x + 48 * GUI, y, 224 * GUI, 30 * GUI);
+      hctx.strokeStyle = completed[entry[0]] ? '#83bd59' : '#777'; hctx.lineWidth = GUI; hctx.strokeRect(frame.x + 48 * GUI, y, 224 * GUI, 30 * GUI);
+      drawPixelText(entry[1], frame.x + 58 * GUI, y + 11 * GUI, 7 * GUI, 'left', completed[entry[0]] ? '#ffffaa' : '#aaa');
+      drawPixelText(entry[2], frame.x + 58 * GUI, y + 23 * GUI, 5 * GUI, 'left', '#ddd');
+    }
+  }
+
+  function drawStatisticsScreen(frame) {
+    const stats = game.player && game.player.stats ? game.player.stats : {};
+    const entries = [
+      ['破坏方块', Math.floor(stats.blocksMined || 0)], ['放置方块', Math.floor(stats.blocksPlaced || 0)],
+      ['合成物品', Math.floor(stats.itemsCrafted || 0)], ['击败生物', Math.floor(stats.mobsKilled || 0)],
+      ['移动距离', (Number(stats.distanceWalked) || 0).toFixed(1) + ' m'],
+    ];
+    for (let index = 0; index < entries.length; index++) {
+      const y = frame.y + (58 + index * 23) * GUI;
+      hctx.fillStyle = index & 1 ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.07)';
+      hctx.fillRect(frame.x + 45 * GUI, y - 10 * GUI, 230 * GUI, 18 * GUI);
+      drawPixelText(entries[index][0], frame.x + 55 * GUI, y + 2 * GUI, 6 * GUI, 'left', '#fff');
+      drawPixelText(String(entries[index][1]), frame.x + 265 * GUI, y + 2 * GUI, 6 * GUI, 'right', '#ffff55');
+    }
   }
 
   function drawPickup(w, h) {

@@ -14,7 +14,20 @@ NEAREST = Image.Resampling.NEAREST
 
 names = json.loads(SLOTS.read_text(encoding='utf-8'))
 normal_names = [name for name in names if not name.startswith('skin.')]
-slots = {name: i for i, name in enumerate(normal_names)}
+PRIMARY_NORMAL_SLOTS = 32 * 28
+SKIN_TILE_COLUMNS = 16
+EXTRA_NORMAL_COLUMNS = 32 - SKIN_TILE_COLUMNS
+MAX_NORMAL_SLOTS = PRIMARY_NORMAL_SLOTS + EXTRA_NORMAL_COLUMNS * 4
+if len(normal_names) > MAX_NORMAL_SLOTS:
+    raise RuntimeError(f'too many texture slots: {len(normal_names)} > {MAX_NORMAL_SLOTS}')
+
+def atlas_slot(index: int) -> int:
+    if index < PRIMARY_NORMAL_SLOTS:
+        return index
+    extra = index - PRIMARY_NORMAL_SLOTS
+    return (28 + extra // EXTRA_NORMAL_COLUMNS) * 32 + SKIN_TILE_COLUMNS + extra % EXTRA_NORMAL_COLUMNS
+
+slots = {name: atlas_slot(i) for i, name in enumerate(normal_names)}
 atlas = Image.new('RGBA', (512, 512), (0, 0, 0, 0))
 mapping: dict[str, str] = {}
 

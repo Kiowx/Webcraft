@@ -9,7 +9,8 @@
     margin: 0; padding: 0; width: 100%; height: 100%;
     overflow: hidden; background: #000;
     font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-    touch-action: none;
+    touch-action: none; overscroll-behavior: none;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
   #game, #hud {
     position: absolute; left: 0; top: 0; width: 100%; height: 100%;
@@ -22,7 +23,7 @@
     outline: 2px solid #000; background: #080808; color: #fff;
     text-align: center; line-height: 1; caret-color: #fff;
     font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-    touch-action: auto; user-select: text;
+    touch-action: auto; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default;
   }
   #nickname-input:focus { border-color: #fff; }
   #chat-input {
@@ -31,7 +32,7 @@
     margin: 0; padding: 2px 7px; border: 0; border-radius: 0; outline: 0;
     background: rgba(0,0,0,0.72); color: #fff; caret-color: #fff;
     font: 16px/26px "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-    text-align: left; touch-action: auto; user-select: text;
+    text-align: left; touch-action: auto; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default;
   }
   #sign-editor {
     position: absolute; display: none; z-index: 6; inset: 0;
@@ -59,6 +60,7 @@
     background: transparent; color: #1d1710; caret-color: #1d1710;
     font: 24px/31px "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
     text-align: center; white-space: pre; touch-action: auto; user-select: text;
+    -webkit-user-select: text; -webkit-touch-callout: default;
   }
   #sign-done {
     width: min(400px, calc(100vw - 64px)); height: 44px; margin-top: 104px;
@@ -158,6 +160,7 @@
 <pre id="selftest-log"></pre>
 
 <script src="js/util.js"></script>
+<script src="js/vanilla.js"></script>
 <script src="js/noise.js"></script>
 <script src="js/textures.js"></script>
 <script src="js/resource-pack.js"></script>

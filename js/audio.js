@@ -59,6 +59,7 @@
     'entity.sheep.ambient', 'entity.sheep.step', 'entity.chicken.ambient', 'entity.chicken.step',
     'entity.wolf.ambient', 'entity.wolf.step', 'entity.villager.ambient', 'entity.cat.ambient',
     'entity.zombie.ambient', 'entity.skeleton.ambient', 'entity.spider.ambient',
+    'combat.swing', 'combat.strong', 'combat.sweep', 'combat.critical', 'combat.block',
   ]);
   const FIXED_MENU_EVENTS = new Set(['ui.button.click', 'ui.slider.tick', 'ui.slot']);
   const UI_EVENT_COOLDOWNS = Object.freeze({
@@ -144,6 +145,8 @@
     'fishing.cast': spec('throw', 'player', 0.17, 4, 3, 20, 0.44, 0.90, 1.02),
     'fishing.catch': spec('splash', 'player', 0.24, 4, 3, 20, 0.58, 1.04, 1.14),
     'combat.swing': spec('swing', 'player', 0.12, 5, 6, 12, 0.34, 0.93, 1.10),
+    'combat.strong': spec('strong', 'player', 0.16, 6, 5, 18, 0.66, 0.96, 1.05),
+    'combat.sweep': spec('sweep', 'player', 0.23, 7, 4, 20, 0.72, 0.96, 1.04),
     'combat.block': spec('shield', 'player', 0.13, 4, 4, 20, 0.74, 0.94, 1.05),
     'combat.critical': spec('critical', 'player', 0.17, 5, 4, 22, 0.76, 0.96, 1.08),
     'door.wood.open': spec('door_open', 'blocks', 0.25, 4, 4, 24, 0.72, 0.94, 1.05),
@@ -414,6 +417,14 @@
           impulse *= 0.91; value = impulse + high * 0.38;
           break;
         case 'equip': case 'throw': case 'swing': value = high * (0.25 + 0.65 * Math.sin(progress * Math.PI)) + low * 0.2; break;
+        case 'strong':
+          phase += Math.PI * 2 * (180 - progress * 70) / rate;
+          value = high * 0.66 * (1 - progress * 0.55) + Math.sin(phase) * 0.42;
+          break;
+        case 'sweep':
+          phase += Math.PI * 2 * (980 - progress * 760) / rate;
+          value = high * 0.58 * (1 - progress) + Math.sin(phase) * 0.32 * Math.sin(progress * Math.PI);
+          break;
         case 'teleport':
           phase += Math.PI * 2 * (760 - progress * 520) / rate;
           value = Math.sin(phase) * 0.42 + high * 0.52 * (1 - progress) + low * 0.18;

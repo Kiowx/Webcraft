@@ -49,7 +49,9 @@
   let rawFallbackAttempted = false;
   let lastT = 0;
   const FIXED_DT = 1 / 20;
-  const PLAYER_DT = 1 / 60;
+  // Java 1.12.2 advances player physics at the same 20 TPS as the world.
+  // Rendering remains smooth through prev/current interpolation below.
+  const PLAYER_DT = FIXED_DT;
   let accumulator = 0;
   let playerAccumulator = 0;
   let meshBudgetMs = 4;
@@ -77,7 +79,7 @@
     'singleplayer', 'multiplayer', 'join_server', 'options', 'video', 'controls', 'sound',
     'language', 'resource', 'done', 'new_survival', 'new_creative', 'continue', 'delete_world',
     'confirm_delete', 'cancel_delete', 'resume', 'save_quit', 'respawn', 'gui_scale',
-    'fullscreen', 'skin', 'quit',
+    'fullscreen', 'skin', 'quit', 'advancements', 'statistics',
   ]);
 
   function resetStreamQueues() {
@@ -161,11 +163,18 @@
         p.x = position.x; p.y = position.y; p.z = position.z;
         p.prevX = p.x; p.prevY = p.y; p.prevZ = p.z; p.vx = p.vy = p.vz = 0;
       }
+      if (message.reason === 'minecart') p.riding = 'minecart';
       if (message.reason === 'portal') UI.toast(message.dimension === 'nether' ? '进入下界' : message.dimension === 'end' ? '进入末地' : '返回主世界');
     };
     Network.onCombat = (message) => {
       const p = game.player;
       if (!p || !game.multiplayer) return;
+      const shieldDisabled = Math.max(0, Number(message.shieldDisabled) || 0);
+      if (shieldDisabled > 0) {
+        p.shieldDisabledTime = Math.max(p.shieldDisabledTime || 0, shieldDisabled);
+        p.setBlocking(false, false);
+        UI.toast('盾牌暂时无法使用');
+      }
       p.hp = U.clamp(Number(message.hp), 0, p.maxHp);
       p.hurtTime = message.blocked ? 0.3 : 0.5;
       if (message.knockback) {
@@ -175,6 +184,11 @@
       }
       if (message.blocked && p.blockHitFeedback) p.blockHitFeedback();
       else Sound.emit('player.hurt', { volume: 0.9 });
+    };
+    Network.onStationResult = message => {
+      if (!message || !message.message) return;
+      UI.toast(String(message.message));
+      if (message.ok) Sound.emit('item.equip', { volume: 0.55, pitch: 1.08 });
     };
     Network.onAttackResult = (message) => {
       if (!message || !message.hit || !game.multiplayer) return;
@@ -186,9 +200,10 @@
           ? 'entity.' + (target.kind || 'generic') + '.hurt'
           : 'entity.generic.hurt';
         Sound.emit(event, { x: target.x, y: target.y + (target.h || 1.8) * 0.55, z: target.z, volume: 0.75 });
-        if (Entities.entityHitParticles) Entities.entityHitParticles(target, false);
+        if (Entities.entityHitParticles) Entities.entityHitParticles(target, !!message.critical);
       }
-      if (UI.hit) UI.hit(false);
+      if (message.critical) Sound.emit('combat.critical', { volume: 0.8 });
+      if (UI.hit) UI.hit(!!message.critical);
     };
     Network.onExplosion = (message) => {
       Sound.emit('explosion', { x: message.x, y: message.y, z: message.z, volume: 1 });
@@ -439,6 +454,8 @@
       case 'join_server': await startMultiplayer(UI.nicknameValue()); break;
       case 'skin': UI.openScreen('skin'); break;
       case 'options': UI.openScreen('options'); break;
+      case 'advancements': UI.openScreen('advancements'); break;
+      case 'statistics': UI.openScreen('statistics'); break;
       case 'video': UI.openScreen('video'); break;
       case 'controls': UI.openScreen('controls'); break;
       case 'sound': UI.openScreen('sound'); break;
@@ -604,13 +621,14 @@
     const craftHandled = craftResponse && UI.finishCraftTransaction
       ? UI.finishCraftTransaction(transaction, reason === 'craft') : false;
     const transientCrafting = UI.hasTransientCrafting && UI.hasTransientCrafting();
-    const authoritativeInventory = ['drop', 'pickup', 'give', 'bow', 'egg', 'ender_pearl', 'eat', 'feed', 'tame', 'trade', 'attack', 'damage', 'death', 'inventory_conflict', 'container', 'furnace', 'block_action', 'station', 'bottle', 'tnt'].includes(reason) ||
+    const authoritativeInventory = ['drop', 'pickup', 'give', 'clear', 'teleport', 'bow', 'egg', 'ender_pearl', 'eat', 'feed', 'tame', 'trade', 'attack', 'damage', 'death', 'inventory_conflict', 'container', 'furnace', 'block_action', 'station', 'bottle', 'tnt', 'vehicle'].includes(reason) ||
       (craftResponse && !transientCrafting && !craftHandled);
     const applyInventory = authoritativeInventory || !UI.shouldApplyProfileInventory || UI.shouldApplyProfileInventory(transaction);
     if (reason === 'inventory_conflict' && UI.resetProfileSync) UI.resetProfileSync();
     if (applyInventory) {
       if (Array.isArray(profile.inv)) for (let i = 0; i < 36; i++) p.inv[i] = profile.inv[i] ? Items.cloneStack(profile.inv[i]) : null;
       if (Array.isArray(profile.equipment)) for (let i = 0; i < 4; i++) p.equipment[i] = profile.equipment[i] ? Items.cloneStack(profile.equipment[i]) : null;
+      p.offhand = profile.offhand ? Items.cloneStack(profile.offhand) : null;
       p.cursor = profile.cursor ? Items.cloneStack(profile.cursor) : null;
       if (UI.inventoryProfileApplied && (authoritativeInventory || reason === 'welcome' || reason === 'reconnect' || reason === 'respawn')) {
         UI.inventoryProfileApplied();
@@ -620,6 +638,16 @@
     p.xpLevel = Math.max(0, profile.xpLevel | 0);
     p.xpProgress = U.clamp(Number(profile.xpProgress) || 0, 0, 1);
     p.statusEffects = Array.isArray(profile.statusEffects) ? profile.statusEffects.map(effect => Object.assign({}, effect)) : [];
+    if (profile.stats && typeof profile.stats === 'object') p.stats = Object.assign(p.stats || {}, profile.stats);
+    if (profile.advancements && typeof profile.advancements === 'object') {
+      const previous = p.advancements || {};
+      const next = Object.assign({}, profile.advancements);
+      p.advancements = next;
+      if (reason !== 'welcome' && reason !== 'reconnect') {
+        const names = { mine_block: '石器时代', craft_item: '工作台制作者', kill_mob: '怪物猎人' };
+        for (const id of Object.keys(next)) if (!previous[id] && UI.advancement) UI.advancement(names[id] || id);
+      }
+    }
     if (profile.spawn) p.spawn = { x: Number(profile.spawn.x), y: Number(profile.spawn.y), z: Number(profile.spawn.z) };
     if (reason === 'respawn' && p.resetRespawnState) {
       p.resetRespawnState({ x:+profile.x, y:+profile.y, z:+profile.z });
@@ -633,6 +661,7 @@
     const dead = !!profile.dead || p.hp <= 0;
     p.dead = dead;
     if (dead) {
+      UI.close();
       game.state = 'dead';
       game.deathCause = 'server';
       if (document.exitPointerLock) document.exitPointerLock();
@@ -677,8 +706,9 @@
     Entities.onMobAttack = (mob, dmg) => {
       const multiplier = [0, 0.75, 1, 1.5][game.difficulty | 0] || 0;
       if (multiplier <= 0) return;
-      const blocked = game.player.blocksDamage && game.player.blocksDamage('mob');
-      game.player.damage(Math.max(1, Math.round(dmg * multiplier)), 'mob');
+      const source = { x: mob.x, z: mob.z };
+      const blocked = game.player.blocksDamage && game.player.blocksDamage('mob', source);
+      game.player.damage(Math.max(1, Math.round(dmg * multiplier)), 'mob', source);
       const dx = game.player.x - mob.x, dz = game.player.z - mob.z;
       const d = Math.hypot(dx, dz) || 1;
       const knockback = blocked ? 0.35 : 1;
@@ -689,6 +719,8 @@
     Entities.onMobKilled = (mob) => {
       const xp = mob.model && mob.model.hostile ? 5 : 1;
       Entities.spawnXP(mob.x, mob.y + mob.h * 0.5, mob.z, xp);
+      if (game.player && game.player.addStat) game.player.addStat('mobsKilled', 1);
+      if (mob.model && mob.model.hostile && game.player && game.player.unlockAdvancement) game.player.unlockAdvancement('kill_mob');
     };
     Entities.onXP = (xp) => {
       game.player.addXP(xp);
@@ -699,8 +731,9 @@
       const p = game.player;
       const d = Math.sqrt(U.dist2(p.x, p.y + 1, p.z, x, y, z));
       if (d < power * 2) {
-        const blocked = p.blocksDamage && p.blocksDamage('explode');
-        p.damage(Math.round(16 * (1 - d / (power * 2))), 'explode');
+        const source = { x, z };
+        const blocked = p.blocksDamage && p.blocksDamage('explode', source);
+        p.damage(Math.round(16 * (1 - d / (power * 2))), 'explode', source);
         const dx = p.x - x, dz = p.z - z;
         const dd = Math.hypot(dx, dz) || 1;
         const knockback = blocked ? 0.35 : 1;
@@ -721,6 +754,7 @@
     };
     UI.onDeath = (cause) => {
       game.deathCause = cause;
+      UI.close();
       game.state = 'dead';
       document.exitPointerLock && document.exitPointerLock();
     };
@@ -953,13 +987,44 @@
   }
 
   // ---------------- input ----------------
-  function bindInput() {
+  function bindBrowserGestureGuards() {
+    const isEditable = target => {
+      const element = target && target.nodeType === 3 ? target.parentElement : target;
+      return !!(element && element.closest && element.closest('input, textarea, select, [contenteditable="true"]'));
+    };
+    const preventGesture = event => {
+      if (!isEditable(event.target) && event.cancelable) event.preventDefault();
+    };
 
+    for (const type of ['contextmenu', 'auxclick', 'dragstart', 'selectstart', 'dblclick',
+      'gesturestart', 'gesturechange', 'gestureend']) {
+      document.addEventListener(type, preventGesture, { capture: true, passive: false });
+    }
+    document.addEventListener('pointerdown', event => {
+      if (event.button !== 0) preventGesture(event);
+    }, { capture: true, passive: false });
+    document.addEventListener('mousedown', event => {
+      if (event.button !== 0) preventGesture(event);
+    }, { capture: true, passive: false });
+    document.addEventListener('pointermove', event => {
+      if (event.pointerType === 'mouse' && (event.buttons & 6)) preventGesture(event);
+    }, { capture: true, passive: false });
+    document.addEventListener('wheel', preventGesture, { capture: true, passive: false });
+    document.addEventListener('touchmove', preventGesture, { capture: true, passive: false });
+  }
+
+  function bindInput() {
+    bindBrowserGestureGuards();
     bindTouchInput();
 
     document.addEventListener('keydown', (e) => {
       Sound.unlock();
       const k = e.code;
+      if (k === 'KeyE' && !e.repeat && game.state === 'playing' && UI.isOpen()) {
+        closeUiAndResume();
+        e.preventDefault();
+        return;
+      }
       if (UI.isOpen() && UI.handleKey && UI.handleKey(e)) { e.preventDefault(); return; }
       if (UI.isMenuOpen()) {
         const menuAction = UI.handleMenuKey(e);
@@ -1028,8 +1093,13 @@
         case 'Escape':
           if (UI.isOpen()) { closeUiAndResume(); }
           break;
-        case 'KeyQ': case 'KeyF':
+        case 'KeyQ':
           if (!e.repeat && !UI.isOpen()) dropHeld(e.ctrlKey);
+          e.preventDefault();
+          break;
+        case 'KeyF':
+          if (!e.repeat && !UI.isOpen()) swapHands();
+          e.preventDefault();
           break;
         case 'KeyR': if (game.state === 'dead') respawn(); break;
         case 'KeyM':
@@ -1258,6 +1328,18 @@
     s.n -= n;
     if (s.n <= 0) p.inv[p.hotbar] = null;
     Sound.emit('item.throw', { x: p.x, y: p.y + p.eye, z: p.z, volume: 0.5, pitch: 0.9 });
+  }
+
+  function swapHands() {
+    const p = game.player;
+    if (!p || p.dead) return;
+    p.setBlocking(false);
+    const held = p.inv[p.hotbar] || null;
+    p.inv[p.hotbar] = p.offhand || null;
+    p.offhand = held;
+    p.equipTime = p.equipDuration;
+    Sound.emit('item.equip', { volume: 0.42, pitch: 1.02 });
+    if (game.multiplayer && Network.commitProfile) Network.commitProfile(p);
   }
 
   function pickBlock() {
@@ -1586,7 +1668,7 @@
       for (const name of ['slot', 'selector', 'hotbar', 'heart_full', 'heart_half', 'food_full', 'air', 'armor_full', 'xp_bg', 'crosshair', 'button']) {
         if (!info.sprites.includes(name)) return 'missing GUI sprite ' + name;
       }
-      if (info.containers.length !== 5 || !info.containers.includes('creative') || info.bitmapGlyphs < 40) return 'incomplete GUI assets';
+      if (info.containers.length !== 6 || !info.containers.includes('creative') || !info.containers.includes('station') || info.bitmapGlyphs < 40) return 'incomplete GUI assets';
       UI.resetMenus();
       const title = UI.menuInfo(1280, 720);
       if (title.screen !== 'title' || title.virtualWidth !== 320 || title.virtualHeight !== 240) return 'title virtual layout';
@@ -1607,7 +1689,7 @@
       if (UI.currentScreen() !== 'video') return 'video screen';
       UI.backScreen();
       if (UI.currentScreen() !== 'options') return 'menu back stack';
-      const screens = ['title', 'multiplayer', 'worlds', 'pause', 'options', 'video', 'controls', 'skin', 'sound', 'language', 'resource', 'confirm_delete', 'death'];
+      const screens = ['title', 'multiplayer', 'worlds', 'pause', 'options', 'video', 'controls', 'skin', 'sound', 'language', 'resource', 'advancements', 'statistics', 'confirm_delete', 'death'];
       const sizes = [[320, 240], [640, 360], [1280, 720], [1920, 1080]];
       for (let scaleMode = 0; scaleMode < 4; scaleMode++) {
         for (const screen of screens) {
@@ -1676,7 +1758,7 @@
       p.updateArmorValue();
       const before = p.equipment[0].dur;
       p.damage(10, 'mob');
-      return (p.armor === 20 && p.hp === 18 && p.equipment[0].dur < before) ||
+      return (p.armor === 20 && p.hp === 17 && p.equipment[0].dur < before) ||
         ('armor=' + p.armor + ' hp=' + p.hp + ' durability=' + p.equipment[0].dur + '/' + before);
     });
 
@@ -2308,7 +2390,7 @@
       creeper.fuse = 0.3; creeper.fuseProgress = 0.8; creeper.age = 0;
       const charged = Entities.buildGeometry(w, 8.5, h + 1, 8.5);
       Entities.clear();
-      return charged.charge.count === 288 || 'charge geometry=' + charged.charge.count;
+      return charged.charge.count === 216 || 'charge geometry=' + charged.charge.count;
     });
 
     const fails = log.filter(l => l.startsWith('FAIL'));

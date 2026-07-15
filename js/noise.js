@@ -25,6 +25,62 @@
 
   function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 
+  // java.util.Random's 48-bit LCG. BigInt keeps the seed transition exact on
+  // every supported browser instead of losing low bits through JS doubles.
+  const JAVA_MULT = 0x5DEECE66Dn;
+  const JAVA_ADD = 0xBn;
+  const JAVA_MASK = (1n << 48n) - 1n;
+  const JAVA_INT_RANGE = 0x80000000;
+
+  function longSeed(seed) {
+    if (typeof seed === 'bigint') return BigInt.asIntN(64, seed);
+    if (typeof seed === 'number' && Number.isFinite(seed)) {
+      return BigInt.asIntN(64, BigInt(Math.trunc(seed)));
+    }
+    const text = String(seed);
+    if (/^-?\d+$/.test(text)) {
+      try { return BigInt.asIntN(64, BigInt(text)); } catch (_) { /* use the stable hash below */ }
+    }
+    return BigInt(U.hash32(text));
+  }
+
+  class JavaRandom {
+    constructor(seed) { this.setSeed(seed); }
+    setSeed(seed) {
+      this.seed = (BigInt.asUintN(64, longSeed(seed)) ^ JAVA_MULT) & JAVA_MASK;
+      return this;
+    }
+    next(bits) {
+      this.seed = (this.seed * JAVA_MULT + JAVA_ADD) & JAVA_MASK;
+      return Number(this.seed >> BigInt(48 - bits));
+    }
+    nextInt(bound) {
+      if (bound === undefined) return this.next(32) | 0;
+      bound = Math.floor(Number(bound));
+      if (!(bound > 0) || bound > 0x7FFFFFFF) throw new RangeError('bound must be in 1..2147483647');
+      if ((bound & (bound - 1)) === 0) return Number((BigInt(bound) * BigInt(this.next(31))) >> 31n);
+      let bits, value;
+      do {
+        bits = this.next(31);
+        value = bits % bound;
+      } while (bits - value + bound - 1 >= JAVA_INT_RANGE);
+      return value;
+    }
+    nextFloat() { return this.next(24) / 16777216; }
+    nextDouble() {
+      return (this.next(26) * 134217728 + this.next(27)) / 9007199254740992;
+    }
+    nextBoolean() { return this.next(1) !== 0; }
+  }
+
+  Noise.JavaRandom = JavaRandom;
+  Noise.javaRandom = function (seed) { return new JavaRandom(seed); };
+  Noise.javaStructureSeed = function (worldSeed, regionX, regionZ, salt) {
+    return BigInt.asIntN(64,
+      longSeed(worldSeed) + BigInt(Math.trunc(regionX)) * 341873128712n +
+      BigInt(Math.trunc(regionZ)) * 132897987541n + longSeed(salt || 0));
+  };
+
   // Perlin-style gradient noise, output roughly [-1, 1]
   Noise.make2D = function (seed) {
     const p = buildPerm(seed);

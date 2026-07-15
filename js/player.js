@@ -1,7 +1,8 @@
 /* player.js — first-person controller, survival stats, mining/placing, inventory */
 'use strict';
 (function () {
-  const GRAV = 26;
+  const MOVE = Vanilla.MOVEMENT;
+  const SURVIVAL = Vanilla.SURVIVAL;
   const SURVIVAL_BLOCK_REACH = 4.5;
   const CREATIVE_BLOCK_REACH = 5.0;
   const ENTITY_REACH = 3.0;
@@ -48,16 +49,22 @@
       this.yaw = 0; this.pitch = 0;
       this.onGround = false;
       this.mode = 'survival';        // survival | creative
+      this.difficulty = 2;
       this.flying = false;
       this.dead = false;
       this.hp = 20; this.maxHp = 20;
       this.hunger = 20; this.saturation = 5;
-      this.air = 10; this.maxAir = 10;
+      this.air = SURVIVAL.maxAirSeconds; this.maxAir = SURVIVAL.maxAirSeconds;
       this.armor = 0;
+      this.armorToughness = 0;
       this.equipment = makeSlots(4);  // helmet, chestplate, leggings, boots
+      this.offhand = null;
       this.xpLevel = 0;
       this.xpProgress = 0;
       this.statusEffects = [];
+      this.stats = { blocksMined: 0, blocksPlaced: 0, mobsKilled: 0, distanceWalked: 0, itemsCrafted: 0 };
+      this.advancements = {};
+      this.riding = null;
       this.fallStart = null;
       this.inv = makeSlots(36);      // 0-8 hotbar
       this.hotbar = 0;
@@ -66,6 +73,7 @@
       this.swing = 0;                // legacy remaining-time view of hand animation
       this.handAction = 'idle';      // idle | attack | mine | use | eat | bow | fish | block
       this.isBlocking = false;
+      this.shieldDisabledTime = 0;
       this.blockBlend = 0;
       this.blockHitTime = 0;
       this.handActionTime = 0;
@@ -73,11 +81,13 @@
       this.equipDuration = 0.18;
       this.equipTime = 0;
       this._heldAnimId = -1;
+      this._offhandAnimId = -1;
       this.useCooldown = 0;
       this.attackCharge = 1;
       this.hurtTime = 0;
       this.regenTimer = 0;
       this.starveTimer = 0;
+      this.drownTimer = 0;
       this.exhaust = 0;
       this.stepDist = 0;
       this.swimSoundDist = 0;
@@ -101,6 +111,7 @@
       this.give(Blocks.ID.TORCH, 8);
       const held = this.held();
       this._heldAnimId = held ? held.id : 0;
+      this._offhandAnimId = 0;
     }
 
     // ---------- inventory ----------
@@ -185,6 +196,41 @@
       }
     }
 
+    shieldStack() {
+      const offhandItem = this.offhand ? Items.get(this.offhand.id) : null;
+      if (offhandItem && offhandItem.shield) return { hand: 'offhand', stack: this.offhand };
+      const held = this.held();
+      const heldItem = held ? Items.get(held.id) : null;
+      return heldItem && heldItem.shield ? { hand: 'main', stack: held } : null;
+    }
+
+    mainHandConsumesUse() {
+      const stack = this.held();
+      const item = stack ? Items.get(stack.id) : null;
+      if (!item || item.shield) return false;
+      return !!(item.bow || item.food || item.fishing || item.block || item.throwable ||
+        item.bucket || item.bottle || item.ignite || item.bonemeal || item.plant ||
+        item.minecart || item.enderEye || (item.tool && item.tool.type === 'hoe'));
+    }
+
+    damageShield(amount) {
+      const shield = this.shieldStack();
+      const stack = shield && shield.stack;
+      if (!stack || stack.dur === undefined) return;
+      let damage = 0;
+      const unbreaking = stack.ench && stack.ench.unbreaking ? stack.ench.unbreaking : 0;
+      for (let i = 0; i < (amount || 1); i++) {
+        if (unbreaking <= 0 || this.world.random() < 1 / (unbreaking + 1)) damage++;
+      }
+      stack.dur -= damage;
+      if (stack.dur <= 0) {
+        if (shield.hand === 'offhand') this.offhand = null;
+        else this.inv[this.hotbar] = null;
+        this.setBlocking(false);
+        Sound.emit('item.break', { volume: 0.8 });
+      }
+    }
+
     heldTool() {
       const s = this.held();
       if (!s) return null;
@@ -193,12 +239,16 @@
     }
 
     updateArmorValue() {
-      let points = 0;
+      let points = 0, toughness = 0;
       for (const stack of this.equipment) {
         const item = stack ? Items.get(stack.id) : null;
-        if (item && item.armor) points += item.armor.points;
+        if (item && item.armor) {
+          points += item.armor.points;
+          toughness += item.armor.toughness || 0;
+        }
       }
       this.armor = U.clamp(points, 0, 20);
+      this.armorToughness = Math.max(0, toughness);
       return this.armor;
     }
 
@@ -237,14 +287,17 @@
       this.swing = 0;
     }
 
-    canSwordBlock() {
-      const stack = this.held();
-      const item = stack ? Items.get(stack.id) : null;
-      return !!(item && item.tool && item.tool.type === 'sword' && !this.dead);
+    canShieldBlock() {
+      return !!(this.shieldStack() && !this.dead && this.shieldDisabledTime <= 0);
     }
 
+    // Kept as a compatibility alias for input and older tests.
+    canSwordBlock() { return this.canUseShield(); }
+
+    canUseShield() { return this.canShieldBlock() && !this.mainHandConsumesUse(); }
+
     setBlocking(active, notify) {
-      active = !!active && this.canSwordBlock();
+      active = !!active && this.canUseShield();
       if (active === this.isBlocking) return false;
       this.isBlocking = active;
       if (active) {
@@ -267,8 +320,17 @@
       return true;
     }
 
-    blocksDamage(cause) {
-      return this.isBlocking && this.canSwordBlock() &&
+    shieldFacesSource(source) {
+      if (!source || !Number.isFinite(source.x) || !Number.isFinite(source.z)) return true;
+      const sx = source.x - this.x, sz = source.z - this.z;
+      const distance = Math.hypot(sx, sz);
+      if (distance < 1e-6) return true;
+      const lookX = -Math.sin(this.yaw), lookZ = -Math.cos(this.yaw);
+      return lookX * sx / distance + lookZ * sz / distance >= Math.cos(50 * Math.PI / 180);
+    }
+
+    blocksDamage(cause, source) {
+      return this.isBlocking && this.canShieldBlock() && this.shieldFacesSource(source) &&
         (cause === 'mob' || cause === 'arrow' || cause === 'player' || cause === 'explode');
     }
 
@@ -281,11 +343,13 @@
     updateHandAnimation(dt) {
       const held = this.held();
       const heldId = held ? held.id : 0;
-      if (heldId !== this._heldAnimId) {
+      const offhandId = this.offhand ? this.offhand.id : 0;
+      if (heldId !== this._heldAnimId || offhandId !== this._offhandAnimId) {
         if (this._heldAnimId >= 0) Sound.emit('item.equip', { volume: 0.36 });
         this._heldAnimId = heldId;
+        this._offhandAnimId = offhandId;
         this.equipTime = this.equipDuration;
-        if (this.isBlocking) this.setBlocking(false);
+        if (this.isBlocking && !this.canUseShield()) this.setBlocking(false);
         if (this.handAction === 'mine' || this.handAction === 'eat' || this.handAction === 'bow' || this.handAction === 'fish') {
           this.stopHandAction(this.handAction);
           this.bowCharge = 0;
@@ -318,6 +382,7 @@
         this.prevX = this.x; this.prevY = this.y; this.prevZ = this.z;
       }
       this.useCooldown = Math.max(0, this.useCooldown - dt);
+      this.shieldDisabledTime = Math.max(0, this.shieldDisabledTime - dt);
       this.attackCharge = Math.min(1, this.attackCharge + dt / this.attackInterval());
       this.hurtTime = Math.max(0, this.hurtTime - dt);
       for (const effect of this.statusEffects) {
@@ -360,36 +425,58 @@
 
       const canSprint = this.mode === 'creative' || this.hunger > 6;
       this.isSprinting = !!(input.sprint && input.fwd && !input.back && !input.sneak && !this.isBlocking && len > 0 && canSprint);
-      let speed = 4.317;
-      if (this.isSprinting) speed *= 1.3;
-      if (input.sneak) speed *= 0.35;
-      if (this.isBlocking) speed *= 0.2;
-      if (this.mode === 'creative' && this.flying) speed *= 2.6;
+      let speed = MOVE.walkSpeed;
+      if (this.isSprinting) speed *= MOVE.sprintMultiplier;
+      if (input.sneak) speed *= MOVE.sneakMultiplier;
+      if (this.isBlocking) speed *= MOVE.blockingMultiplier;
+      if (this.mode === 'creative' && this.flying) speed *= MOVE.flyMultiplier;
       const underId = world.getBlock(Math.floor(this.x), Math.floor(this.y - 0.05), Math.floor(this.z));
       const surfaceFactor = Blocks.get(underId).speedFactor;
       if (this.onGround && Number.isFinite(surfaceFactor)) speed *= surfaceFactor;
 
-      if (this.mode === 'creative' && this.flying) {
+      if (this.riding === 'minecart') {
+        const railX = Math.floor(this.x), railY = Math.floor(this.y + 0.05), railZ = Math.floor(this.z);
+        if (input.sneak || world.getBlock(railX, railY, railZ) !== Blocks.ID.RAIL) {
+          this.dismountMinecart();
+        } else {
+          const axisX = (world.getState(railX, railY, railZ) & 1) === 1;
+          const drive = (input.fwd ? 1 : 0) - (input.back ? 1 : 0);
+          const facingSign = axisX ? (Math.sin(this.yaw) >= 0 ? 1 : -1) : (-Math.cos(this.yaw) >= 0 ? 1 : -1);
+          const target = drive * facingSign * 8;
+          const blend = Math.min(1, dt * (drive ? 4.5 : 1.6));
+          if (axisX) {
+            this.vx = U.lerp(this.vx, target, blend); this.vz = 0;
+            this.z = U.lerp(this.z, railZ + 0.5, Math.min(1, dt * 14));
+          } else {
+            this.vz = U.lerp(this.vz, target, blend); this.vx = 0;
+            this.x = U.lerp(this.x, railX + 0.5, Math.min(1, dt * 14));
+          }
+          this.vy = 0; this.y = railY + 0.01; this.onGround = true;
+          Physics.move(world, this, dt);
+        }
+      } else if (this.mode === 'creative' && this.flying) {
         // fly
-        this.vx += (dx * speed - this.vx) * Math.min(1, 12 * dt);
-        this.vz += (dz * speed - this.vz) * Math.min(1, 12 * dt);
+        this.vx = Vanilla.approachVelocity(this.vx, dx * speed, MOVE.airDrag, dt);
+        this.vz = Vanilla.approachVelocity(this.vz, dz * speed, MOVE.airDrag, dt);
         let vyT = 0;
         if (input.jump) vyT += speed;
         if (input.sneak) vyT -= speed;
-        this.vy += (vyT - this.vy) * Math.min(1, 12 * dt);
+        this.vy = Vanilla.approachVelocity(this.vy, vyT, MOVE.airDrag, dt);
         Physics.move(world, this, dt);
         if (this.onGround && input.sneakLandedReset !== false) { /* keep flying */ }
       } else if (onLadder) {
-        const climbSpeed = 2.35;
-        this.vx += (dx * speed * 0.35 - this.vx) * Math.min(1, 10 * dt);
-        this.vz += (dz * speed * 0.35 - this.vz) * Math.min(1, 10 * dt);
-        const climbTarget = input.jump ? climbSpeed : input.sneak ? -climbSpeed : Math.max(-3, Math.min(0, this.vy));
-        this.vy += (climbTarget - this.vy) * Math.min(1, 12 * dt);
+        const climbSpeed = MOVE.ladderClimbVelocity;
+        const ladderTargetX = U.clamp(dx * speed * 0.35, -MOVE.ladderHorizontalLimit, MOVE.ladderHorizontalLimit);
+        const ladderTargetZ = U.clamp(dz * speed * 0.35, -MOVE.ladderHorizontalLimit, MOVE.ladderHorizontalLimit);
+        this.vx = Vanilla.approachVelocity(this.vx, ladderTargetX, MOVE.airDrag, dt);
+        this.vz = Vanilla.approachVelocity(this.vz, ladderTargetZ, MOVE.airDrag, dt);
+        const climbTarget = input.jump ? climbSpeed : input.sneak ? 0 : Math.max(MOVE.ladderFallLimit, Math.min(0, this.vy));
+        this.vy = Vanilla.approachVelocity(this.vy, climbTarget, MOVE.airDrag, dt);
         Physics.move(world, this, dt);
       } else if (inCobweb) {
-        this.vx += (dx * speed * 0.15 - this.vx) * Math.min(1, 12 * dt);
-        this.vz += (dz * speed * 0.15 - this.vz) * Math.min(1, 12 * dt);
-        this.vy = Math.max(-0.65, this.vy - GRAV * 0.04 * dt);
+        this.vx = Vanilla.approachVelocity(this.vx, dx * speed * 0.2, 0.25, dt);
+        this.vz = Vanilla.approachVelocity(this.vz, dz * speed * 0.2, 0.25, dt);
+        this.vy = Math.max(-0.65, Vanilla.approachVelocity(this.vy, -0.4, 0.05, dt));
         if (input.jump) this.vy = Math.max(this.vy, 0.45);
         Physics.move(world, this, dt);
       } else if (inWater || inLava) {
@@ -397,43 +484,59 @@
         if (this.isSprinting) liquidSpeed *= 1.3;
         if (input.sneak) liquidSpeed *= 0.5;
         if (this.isBlocking) liquidSpeed *= 0.2;
-        const liquidAccel = inLava ? 3.5 : 6.0;
-        this.vx += (dx * liquidSpeed - this.vx) * Math.min(1, liquidAccel * dt);
-        this.vz += (dz * liquidSpeed - this.vz) * Math.min(1, liquidAccel * dt);
+        const liquidDrag = inLava ? MOVE.lavaDrag : MOVE.waterDrag;
+        this.vx = Vanilla.approachVelocity(this.vx, dx * liquidSpeed, liquidDrag, dt);
+        this.vz = Vanilla.approachVelocity(this.vz, dz * liquidSpeed, liquidDrag, dt);
         const flow = Physics.liquidFlow(world, this, inLava ? 'lava' : 'water');
         const flowForce = inLava ? 0.8 : 2.4;
         this.vx += flow[0] * flowForce * dt;
         this.vy += flow[1] * flowForce * dt;
         this.vz += flow[2] * flowForce * dt;
-        this.vy -= GRAV * 0.28 * dt;
-        this.vy *= (1 - Math.min(1, 2.8 * dt));
-        if (input.jump) this.vy += 22 * dt;
+        this.vy = Vanilla.liquidVerticalVelocity(this.vy, dt, inLava);
+        if (input.jump) this.vy += MOVE.liquidJumpPerTick * dt * Vanilla.TICK_RATE;
         Physics.move(world, this, dt);
       } else {
-        const accel = this.onGround ? 14 : 3.2;
-        this.vx += (dx * speed - this.vx) * Math.min(1, accel * dt);
-        this.vz += (dz * speed - this.vz) * Math.min(1, accel * dt);
+        const horizontalDrag = this.onGround ? MOVE.groundDrag : MOVE.airDrag;
+        this.vx = Vanilla.approachVelocity(this.vx, dx * speed, horizontalDrag, dt);
+        this.vz = Vanilla.approachVelocity(this.vz, dz * speed, horizontalDrag, dt);
         if (input.jump && this.onGround) {
-          this.vy = 8.4;
-          this.exhaust += this.isSprinting ? 0.2 : 0.05;
+          this.vy = MOVE.jumpVelocity;
+          if (this.isSprinting) {
+            this.vx += dx * MOVE.sprintJumpBoost;
+            this.vz += dz * MOVE.sprintJumpBoost;
+          }
+          this.exhaust += this.isSprinting ? SURVIVAL.sprintJumpExhaustion : SURVIVAL.jumpExhaustion;
           Sound.emit('player.jump', { volume: this.isSprinting ? 0.38 : 0.3 });
         }
-        this.vy -= GRAV * dt;
-        if (this.vy < -60) this.vy = -60;
-        const preX = this.x, preZ = this.z;
         let wantX = this.vx * dt, wantZ = this.vz * dt;
         if (input.sneak && this.onGround) {
           const clipped = Physics.clipSneakMovement(world, this, wantX, wantZ);
           wantX = clipped[0]; wantZ = clipped[1];
           this.vx = wantX / dt; this.vz = wantZ / dt;
         }
+        const moveVx = this.vx, moveVz = this.vz;
         Physics.move(world, this, dt);
+        if (!this.onGround && Math.abs(this.vy) < 1e-8 &&
+            Physics.supportCount(world, this, this.x, this.y, this.z) > 0) {
+          this.onGround = true;
+        }
+        let autoJumped = false;
         // vanilla-like auto jump: trigger a real jump arc instead of stepping up instantly
         if (len > 0 && this.onGround) {
-          const blockedX = Math.abs((this.x - preX) - wantX) > Math.abs(wantX) * 0.55 && Math.abs(wantX) > 1e-4;
-          const blockedZ = Math.abs((this.z - preZ) - wantZ) > Math.abs(wantZ) * 0.55 && Math.abs(wantZ) > 1e-4;
-          if ((blockedX || blockedZ) && this.canAutoJump(input, dx, dz)) this.doAutoJump(dx, dz, speed);
+          // Horizontal collision resolution clears the matching velocity. Using that
+          // signal stays reliable when the fixed movement tick or acceleration changes.
+          const blockedX = Math.abs(wantX) > 1e-4 && Math.abs(moveVx) > 1e-4 && Math.abs(this.vx) < 1e-6;
+          const blockedZ = Math.abs(wantZ) > 1e-4 && Math.abs(moveVz) > 1e-4 && Math.abs(this.vz) < 1e-6;
+          if ((blockedX || blockedZ) && this.canAutoJump(input, dx, dz)) {
+            this.doAutoJump(dx, dz, speed);
+            autoJumped = true;
+          }
         }
+        // Minecraft moves with the current vertical velocity, then applies gravity
+        // and drag for the next tick. Preserve a newly queued auto-jump unchanged,
+        // because its vertical movement begins on the following tick.
+        if (!autoJumped) this.vy = this.onGround ? 0 : Vanilla.airVerticalVelocity(this.vy, dt);
+        if (this.vy < -60) this.vy = -60;
       }
 
       // fall damage
@@ -467,17 +570,18 @@
         this.air -= dt;
         if (this.air <= 0) {
           this.air = 0;
-          this.starveTimer += dt;
-          if (this.starveTimer > 1) { this.starveTimer = 0; this.damage(2, 'drown'); }
+          this.drownTimer += dt;
+          if (this.drownTimer >= 1) { this.drownTimer %= 1; this.damage(2, 'drown'); }
         }
       } else {
-        this.air = Math.min(this.maxAir, this.air + dt * 3);
+        this.air = this.maxAir;
+        this.drownTimer = 0;
       }
 
       // lava damage
       if (inLava && this.mode === 'survival') {
         this.lavaTimer += dt;
-        if (this.lavaTimer > 0.4) { this.lavaTimer = 0; this.damage(4, 'lava'); }
+        if (this.lavaTimer >= 0.5) { this.lavaTimer %= 0.5; this.damage(4, 'lava'); }
       }
       const feetId = world.getBlock(Math.floor(this.x), Math.floor(this.y + 0.1), Math.floor(this.z));
       const bodyId = world.getBlock(Math.floor(this.x), Math.floor(this.y + 1.0), Math.floor(this.z));
@@ -513,7 +617,7 @@
       if (this.fireTicks > 0 && this.mode === 'survival') {
         this.fireTicks = Math.max(0, this.fireTicks - dt);
         this.fireDamageTimer = (this.fireDamageTimer || 0) + dt;
-        if (this.fireDamageTimer >= 1) { this.fireDamageTimer %= 1; this.damage(1, 'lava'); }
+        if (this.fireDamageTimer >= 1) { this.fireDamageTimer %= 1; this.damage(1, 'fire'); }
       } else this.fireDamageTimer = 0;
       // cactus contact
       if (this.mode === 'survival') {
@@ -521,7 +625,7 @@
         for (const [ox, oy, oz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,-1,0]]) {
           if (world.getBlock(bx + ox, by + oy, bz + oz) === Blocks.ID.CACTUS) {
             this.cactusTimer = (this.cactusTimer || 0) + dt;
-            if (this.cactusTimer > 0.8) { this.cactusTimer = 0; this.damage(1, 'cactus'); }
+            if (this.cactusTimer >= 0.5) { this.cactusTimer %= 0.5; this.damage(1, 'cactus'); }
             break;
           }
         }
@@ -529,27 +633,57 @@
 
       // hunger / regen
       if (this.mode === 'survival') {
-        const moving = Math.hypot(this.vx, this.vz) > 0.5;
-        if (this.isSprinting && moving) this.exhaust += dt * 0.6;
-        else if (moving) this.exhaust += dt * 0.06;
-        if (this.statusEffects.some(e => e.type === 'hunger')) this.exhaust += dt * 0.1;
-        while (this.exhaust >= 4) {
-          this.exhaust -= 4;
-          if (this.saturation > 0) this.saturation--;
+        const horizontalDistance = Math.hypot(this.vx, this.vz) * dt;
+        if (this.isSprinting && horizontalDistance > 0) {
+          this.exhaust += horizontalDistance * SURVIVAL.sprintExhaustionPerMeter;
+        }
+        if (inWater) {
+          this.exhaust += Math.hypot(this.vx, this.vy, this.vz) * dt * SURVIVAL.swimExhaustionPerMeter;
+        }
+        for (const effect of this.statusEffects) {
+          if (effect.type === 'hunger') this.exhaust += dt * 0.1 * Math.max(1, (effect.level || 0) + 1);
+        }
+        while (this.exhaust >= SURVIVAL.exhaustionThreshold) {
+          this.exhaust -= SURVIVAL.exhaustionThreshold;
+          if (this.saturation > 0) this.saturation = Math.max(0, this.saturation - 1);
           else if (this.hunger > 0) this.hunger--;
         }
-        if (this.hunger >= 18 && this.hp < this.maxHp) {
+
+        if ((this.difficulty | 0) === 0) {
+          this.hunger = 20;
+          this.saturation = Math.max(this.saturation, 5);
+        }
+        if (this.hunger >= 20 && this.saturation > 0 && this.hp < this.maxHp) {
           this.regenTimer += dt;
-          if (this.regenTimer > 4) { this.regenTimer = 0; this.hp = Math.min(this.maxHp, this.hp + 1); this.exhaust += 3; }
+          if (this.regenTimer >= SURVIVAL.fastRegenSeconds) {
+            this.regenTimer %= SURVIVAL.fastRegenSeconds;
+            const healed = Math.min(this.saturation, 6) / 6;
+            this.hp = Math.min(this.maxHp, this.hp + healed);
+            this.exhaust += healed * SURVIVAL.slowRegenExhaustion;
+          }
+        } else if (this.hunger >= 18 && this.hp < this.maxHp) {
+          this.regenTimer += dt;
+          if (this.regenTimer >= SURVIVAL.slowRegenSeconds) {
+            this.regenTimer %= SURVIVAL.slowRegenSeconds;
+            this.hp = Math.min(this.maxHp, this.hp + 1);
+            this.exhaust += SURVIVAL.slowRegenExhaustion;
+          }
+        } else {
+          this.regenTimer = 0;
         }
-        if (this.hunger <= 0) {
+        if (this.hunger <= 0 && (this.difficulty | 0) > 0) {
           this.starveTimer += dt;
-          if (this.starveTimer > 4 && this.hp > 1) { this.starveTimer = 0; this.damage(1, 'starve'); }
-        }
+          const floor = Vanilla.starvationFloor(this.difficulty);
+          if (this.starveTimer >= SURVIVAL.starvationSeconds) {
+            this.starveTimer %= SURVIVAL.starvationSeconds;
+            if (this.hp > floor) this.damage(1, 'starve');
+          }
+        } else this.starveTimer = 0;
       }
 
       // step sounds + view bob
       const hSpeed = Math.hypot(this.vx, this.vz);
+      if (hSpeed > 0.05 && this.onGround && !this.flying && this.riding !== 'minecart') this.addStat('distanceWalked', hSpeed * dt);
       this.bobAmp = U.lerp(this.bobAmp, this.onGround && hSpeed > 0.5 ? Math.min(1, hSpeed / 5.6) : 0, Math.min(1, 10 * dt));
       if (this.onGround && !inWater && !inLava && !onLadder && hSpeed > 0.5) {
         this.bobPhase = (this.bobPhase + dt * hSpeed * 1.6) % 2;
@@ -597,8 +731,7 @@
     }
 
     doAutoJump(dx, dz, speed) {
-      const step = this._autoJumpStep || 1;
-      this.vy = U.clamp(Math.sqrt(2 * GRAV * (step + 0.35)), 6.2, 8.4);
+      this.vy = MOVE.jumpVelocity;
       const push = speed * 0.55;
       this.vx = dx * Math.max(Math.abs(this.vx), push);
       this.vz = dz * Math.max(Math.abs(this.vz), push);
@@ -683,11 +816,13 @@
       // chest/furnace contents drop
       if (world.getBE(x, y, z)) Entities.dropBE(world, x, y, z);
       world.setBlock(x, y, z, 0);
+      this.addStat('blocksMined', 1);
       const tile = def.tex.all || def.tex.side || def.tex.top;
       if (tile) Entities.blockBreakParticles(x, y, z, tile);
       Sound.emit(blockSound(id, 'break'), { x, y, z, volume: 0.9, pitch: 0.9 });
       if (this.mode === 'survival') {
         const canHarvest = this.canHarvest(id);
+        if (canHarvest && (id === Blocks.ID.STONE || id === Blocks.ID.COBBLE)) this.unlockAdvancement('mine_block');
         this.damageTool();
         this.exhaust += 0.005;
         const serverDrops = typeof Network !== 'undefined' && Network.isConnected && Network.isConnected();
@@ -704,11 +839,9 @@
     creativeBreak() {
       const hit = this.look(CREATIVE_BLOCK_REACH);
       if (!hit) return;
-      if (Blocks.get(hit.id).hardness < 0 && hit.id !== Blocks.ID.WATER && hit.id !== Blocks.ID.LAVA) {
-        if (hit.id === Blocks.ID.BEDROCK) return;
-      }
       if (this.world.getBE(hit.x, hit.y, hit.z)) Entities.dropBE(this.world, hit.x, hit.y, hit.z);
       this.world.setBlock(hit.x, hit.y, hit.z, 0);
+      this.addStat('blocksMined', 1);
       const def = Blocks.get(hit.id);
       const tile = def.tex.all || def.tex.side || def.tex.top;
       if (tile) Entities.blockBreakParticles(hit.x, hit.y, hit.z, tile);
@@ -862,6 +995,25 @@
       return true;
     }
 
+    brewHeld(x, y, z) {
+      if (typeof Network !== 'undefined' && Network.isConnected()) return Network.useStation('brew', x, y, z);
+      const held = this.held();
+      if (held && held.id === Items.IT.WATER_BOTTLE && this.countItem(Items.IT.NETHER_WART) > 0) {
+        if (this.mode === 'survival') this.consumeItem(Items.IT.NETHER_WART, 1);
+        this.inv[this.hotbar] = Items.makeStack(Items.IT.AWKWARD_POTION, 1);
+        UI.toast('酿造完成：粗制的药水');
+      } else if (held && held.id === Items.IT.AWKWARD_POTION && this.countItem(Items.IT.GLOWSTONE_DUST) > 0) {
+        if (this.mode === 'survival') this.consumeItem(Items.IT.GLOWSTONE_DUST, 1);
+        this.inv[this.hotbar] = Items.makeStack(Items.IT.HEALING_POTION, 1);
+        UI.toast('酿造完成：治疗药水');
+      } else {
+        UI.toast('水瓶 + 下界疣，之后加入萤石粉');
+        return false;
+      }
+      Sound.play('pop', 0.75, 0.8);
+      return true;
+    }
+
     useBlock() {
       // returns true if interaction consumed the click
       if (this.useCooldown > 0) return true;
@@ -870,6 +1022,9 @@
       const ID = Blocks.ID;
       const held = this.held();
       const heldItem = held ? Items.get(held.id) : null;
+      if (hit.id === ID.RAIL && heldItem && heldItem.minecart) {
+        return this.mountMinecart(hit.x, hit.y, hit.z);
+      }
       const bypassContainer = this.isSneaking && heldItem &&
         (heldItem.block || heldItem.bucket || heldItem.ignite || heldItem.plant || heldItem.bonemeal);
       // Vanilla workbench/furnace GUIs do not have an opening sound. Chests do,
@@ -883,25 +1038,13 @@
         return true;
       }
       if (!bypassContainer && hit.id === ID.ENCHANTING_TABLE) {
-        this.enchantHeld(hit.x, hit.y, hit.z); this.useCooldown = 0.3; return true;
+        UI.openStation('enchant', hit.x, hit.y, hit.z); this.useCooldown = 0.2; return true;
       }
       if (!bypassContainer && hit.id === ID.ANVIL) {
-        this.repairHeld(hit.x, hit.y, hit.z); this.useCooldown = 0.3; return true;
+        UI.openStation('repair', hit.x, hit.y, hit.z); this.useCooldown = 0.2; return true;
       }
       if (!bypassContainer && hit.id === ID.BREWING_STAND) {
-        const multiplayer = typeof Network !== 'undefined' && Network.isConnected();
-        if (multiplayer) Network.useStation('brew', hit.x, hit.y, hit.z);
-        else if (held && held.id === Items.IT.WATER_BOTTLE && this.countItem(Items.IT.NETHER_WART) > 0) {
-          if (this.mode === 'survival') this.consumeItem(Items.IT.NETHER_WART, 1);
-          this.inv[this.hotbar] = Items.makeStack(Items.IT.AWKWARD_POTION, 1);
-          UI.toast('酿造完成：粗制的药水');
-        } else if (held && held.id === Items.IT.AWKWARD_POTION && this.countItem(Items.IT.GLOWSTONE_DUST) > 0) {
-          if (this.mode === 'survival') this.consumeItem(Items.IT.GLOWSTONE_DUST, 1);
-          this.inv[this.hotbar] = Items.makeStack(Items.IT.HEALING_POTION, 1);
-          UI.toast('酿造完成：治疗药水');
-        } else UI.toast('水瓶 + 下界疣，之后加入萤石粉');
-        this.beginHandAction('use', 0.3); this.useCooldown = 0.3;
-        return true;
+        UI.openStation('brew', hit.x, hit.y, hit.z); this.useCooldown = 0.2; return true;
       }
       if (heldItem && heldItem.tool && heldItem.tool.type === 'hoe' &&
           (hit.id === ID.GRASS || hit.id === ID.DIRT || hit.id === ID.GRASS_SNOW) &&
@@ -1014,6 +1157,40 @@
         return true;
       }
       return false;
+    }
+
+    mountMinecart(x, y, z) {
+      if (this.riding === 'minecart') return true;
+      if (this.world.getBlock(x, y, z) !== Blocks.ID.RAIL) return false;
+      const stack = this.held();
+      const item = stack ? Items.get(stack.id) : null;
+      if (!item || !item.minecart) return false;
+      if (typeof Network !== 'undefined' && Network.isConnected && Network.isConnected()) {
+        if (!Network.mountMinecart(x, y, z)) return false;
+        this.useCooldown = 0.35;
+        return true;
+      } else if (this.mode !== 'creative') {
+        this.consumeHeld(1);
+      }
+      this.riding = 'minecart';
+      this.x = x + 0.5; this.y = y + 0.01; this.z = z + 0.5;
+      this.vx = this.vy = this.vz = 0;
+      this.useCooldown = 0.35;
+      Sound.emit('item.equip', { x:this.x, y:this.y, z:this.z, volume:0.65, pitch:0.72 });
+      return true;
+    }
+
+    dismountMinecart() {
+      if (this.riding !== 'minecart') return false;
+      this.riding = null;
+      this.vx *= 0.2; this.vz *= 0.2;
+      if (typeof Network !== 'undefined' && Network.isConnected && Network.isConnected()) {
+        if (Network.dismountMinecart) Network.dismountMinecart();
+      } else if (this.mode !== 'creative') {
+        const left = this.give(Items.IT.MINECART, 1);
+        if (left) Entities.spawnItem(this.x, this.y + 0.5, this.z, Items.IT.MINECART, left);
+      }
+      return true;
     }
 
     placeBlock() {
@@ -1179,6 +1356,7 @@
         if (py + 1 >= World.CH_H || (upper !== Blocks.ID.AIR && !Blocks.get(upper).replaceable)) return;
       }
       this.world.setBlock(px, py, pz, placeId);
+      this.addStat('blocksPlaced', 1);
       if (!placingDoor && placement.hasState) {
         this.world.setState(px, py, pz, placement.state);
         placedState = placement.state;
@@ -1260,7 +1438,8 @@
     updateUseActions(dt, input) {
       const stack = this.held();
       const item = stack ? Items.get(stack.id) : null;
-      if (item && item.tool && item.tool.type === 'sword') {
+      const shield = this.canUseShield() ? this.shieldStack() : null;
+      if (shield) {
         if (input.use && !this.dead) {
           this.setBlocking(true);
           if (this.handAction === 'idle') this.beginHandAction('block', 1);
@@ -1348,17 +1527,33 @@
       let dmg = this.mode === 'creative' ? 10 : (tool ? tool.damage : 1);
       const held = this.held();
       const sharpness = held && held.ench && held.ench.sharpness ? held.ench.sharpness : 0;
-      if (sharpness > 0) dmg += sharpness * 1.25;
-      if (this.mode !== 'creative') dmg *= 0.2 + charge * charge * 0.8;
+      dmg += Vanilla.sharpnessBonus(sharpness);
+      if (this.mode !== 'creative') dmg *= Vanilla.attackScale(charge);
       const critical = this.mode === 'survival' && !this.onGround && this.vy < -0.05 &&
-        charge > 0.9 && !this.flying && !Physics.headInLiquid(this.world, this, 'water');
+        charge > 0.9 && !this.isSprinting && !this.flying &&
+        !Physics.headInLiquid(this.world, this, 'water') && !Physics.touchesBlock(this.world, this, Blocks.ID.LADDER);
       if (critical) dmg *= 1.5;
       const sprintHit = this.isSprinting && charge > 0.9;
       const accepted = Entities.hurtMob(this.world, hit.entity, dmg, this.x, this.z, sprintHit ? 1.45 : 1);
       if (!accepted) return false;
+      const sweep = tool && tool.type === 'sword' && charge > 0.9 && this.onGround && !sprintHit;
+      if (sweep) {
+        const nearby = Entities.queryBox(hit.entity.x - 1, hit.entity.z - 1, hit.entity.x + 1, hit.entity.z + 1);
+        let swept = 0;
+        for (const entity of nearby) {
+          if (entity === hit.entity || entity.dead || entity.type !== 'mob' || Math.abs(entity.y - this.y) > 0.25) continue;
+          if (Entities.hurtMob(this.world, entity, 1, this.x, this.z, 0.4)) {
+            swept++;
+            if (Entities.entityHitParticles) Entities.entityHitParticles(entity, false);
+          }
+        }
+        if (swept > 0) Sound.emit('combat.sweep', { volume: 0.72 });
+      } else if (charge > 0.9 && !critical) {
+        Sound.emit('combat.strong', { volume: 0.62 });
+      }
       if (tool && this.mode === 'survival') this.damageTool(tool.type === 'sword' ? 1 : 2);
       if (sprintHit) this.isSprinting = false;
-      this.exhaust += 0.3;
+      this.exhaust += SURVIVAL.attackExhaustion;
       if (critical) Sound.emit('combat.critical', { volume: 0.8 });
       if (Entities.entityHitParticles) Entities.entityHitParticles(hit.entity, critical);
       if (UI.hit) UI.hit(critical);
@@ -1378,18 +1573,23 @@
       return strength;
     }
 
-    damage(n, cause) {
+    damage(n, cause, source) {
       if (this.dead || this.mode === 'creative') return;
       if (this.hurtTime > 0 && cause !== 'void' && cause !== 'starve') return;
-      const blocked = this.blocksDamage(cause);
-      if (blocked) n *= 0.5;
+      const blocked = this.blocksDamage(cause, source);
       const rawDamage = n;
-      if (cause === 'mob' || cause === 'explode' || cause === 'cactus' || cause === 'arrow') {
+      if (blocked) {
+        if (rawDamage >= 3) this.damageShield(1 + Math.floor(rawDamage));
+        n = 0;
+      }
+      if (cause === 'mob' || cause === 'explode' || cause === 'cactus' || cause === 'arrow' || cause === 'lava' || cause === 'fire') {
         let protection = 0;
         for (const stack of this.equipment) if (stack && stack.ench && stack.ench.protection) protection += stack.ench.protection;
-        const reduction = U.clamp(this.armor, 0, 20) * 0.04 + U.clamp(protection, 0, 10) * 0.025;
-        n = Math.max(1, Math.round(n * (1 - Math.min(0.84, reduction))));
-        if (this.armor > 0) this.damageArmor(rawDamage);
+        if (!blocked) {
+          n = Vanilla.applyArmor(n, this.armor, this.armorToughness);
+          n = Vanilla.applyProtection(n, protection);
+          if (this.armor > 0) this.damageArmor(rawDamage);
+        }
       }
       this.hp -= n;
       this.hurtTime = blocked ? 0.3 : 0.5;
@@ -1419,9 +1619,31 @@
           if (s) Entities.spawnItem(this.x, this.y + 1, this.z, s.id, s.n, undefined, undefined, undefined, s);
           this.equipment[i] = null;
         }
+        if (this.offhand) {
+          Entities.spawnItem(this.x, this.y + 1, this.z, this.offhand.id, this.offhand.n,
+            undefined, undefined, undefined, this.offhand);
+          this.offhand = null;
+        }
         this.updateArmorValue();
         if (UI.onDeath) UI.onDeath(cause);
       }
+    }
+
+    addStat(name, amount) {
+      if (!this.stats || typeof this.stats !== 'object') this.stats = {};
+      const next = Math.max(0, Number(this.stats[name]) || 0) + (Number(amount) || 0);
+      this.stats[name] = next;
+      return next;
+    }
+
+    unlockAdvancement(id) {
+      if (!id) return false;
+      if (!this.advancements || typeof this.advancements !== 'object') this.advancements = {};
+      if (this.advancements[id]) return false;
+      this.advancements[id] = Date.now();
+      const names = { mine_block: '石器时代', craft_item: '工作台制作者', kill_mob: '怪物猎人' };
+      if (typeof UI !== 'undefined' && UI.advancement) UI.advancement(names[id] || id);
+      return true;
     }
 
     resetRespawnState(position) {
@@ -1444,6 +1666,8 @@
       this.isSprinting = false;
       this.isSneaking = false;
       this.isBlocking = false;
+      this.shieldDisabledTime = 0;
+      this.riding = null;
       this.blockBlend = 0;
       this.blockHitTime = 0;
       this.handAction = 'idle';
@@ -1459,6 +1683,7 @@
       this.autoJumpCooldown = 0;
       this.regenTimer = 0;
       this.starveTimer = 0;
+      this.drownTimer = 0;
       this.lavaTimer = 0;
       this.fireTicks = 0;
       this.exhaust = 0;
@@ -1472,6 +1697,7 @@
       this._wasInWater = false;
       const held = this.held();
       this._heldAnimId = held ? held.id : 0;
+      this._offhandAnimId = this.offhand ? this.offhand.id : 0;
     }
 
     respawn() {
@@ -1487,8 +1713,9 @@
         yaw: Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw)),
         pitch: U.clamp(this.pitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01),
         hp: this.hp, hunger: this.hunger, saturation: this.saturation, mode: this.mode, hotbar: this.hotbar,
-        inv: this.inv, equipment: this.equipment, cursor: this.cursor, spawn: this.spawn, flying: this.flying,
+        inv: this.inv, equipment: this.equipment, offhand: this.offhand, cursor: this.cursor, spawn: this.spawn, flying: this.flying,
         armor: this.armor, xpLevel: this.xpLevel, xpProgress: this.xpProgress, statusEffects: this.statusEffects,
+        stats: this.stats, advancements: this.advancements,
       };
     }
     deserialize(d) {
@@ -1507,6 +1734,8 @@
       this.xpLevel = d.xpLevel || 0;
       this.xpProgress = U.clamp(d.xpProgress || 0, 0, 1);
       this.statusEffects = Array.isArray(d.statusEffects) ? d.statusEffects.filter(e => e && typeof e.type === 'string' && e.time > 0) : [];
+      if (d.stats && typeof d.stats === 'object') this.stats = Object.assign(this.stats, d.stats);
+      if (d.advancements && typeof d.advancements === 'object') this.advancements = Object.assign({}, d.advancements);
       this.mode = d.mode || 'survival';
       this.hotbar = d.hotbar || 0;
       this.flying = !!d.flying;
@@ -1518,6 +1747,7 @@
         const item = stack ? Items.get(stack.id) : null;
         this.equipment[i] = item && item.armor && item.armor.slot === i ? stack : null;
       }
+      this.offhand = d.offhand && Items.get(d.offhand.id) ? d.offhand : null;
       this.updateArmorValue();
     }
   }

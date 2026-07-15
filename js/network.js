@@ -309,7 +309,8 @@
       age: 0, animPhase: 0, animSpeed: 0, targetSpeed: 0,
       action: 'idle', actionPhase: 0, attackAnim: 0,
       blocking: false, blockBlend: 0,
-      onGround: !!data.onGround, sneaking: false, sprinting: false, held: 0,
+      onGround: !!data.onGround, sneaking: false, sprinting: false, held: Number(data.held) || 0,
+      offhand: Number(data.offhand) || 0, riding: null,
       skin: safeSkin(data.skin), modelType: safeModelType(data.modelType),
       equipment: Array.isArray(data.equipment) ? data.equipment.slice(0, 4) : Array(4).fill(null),
       audioStepDist: 0,
@@ -330,6 +331,7 @@
     remote.targetSpeed = U.clamp(Number(data.speed) || 0, 0, 30);
     const startedAttack = data.action === 'attack' && (remote.action !== 'attack' || Number(data.actionPhase) < remote.actionPhase);
     const changedHeld = Number.isInteger(data.held) && data.held !== remote.held;
+    const changedOffhand = Number.isInteger(data.offhand) && data.offhand !== remote.offhand;
     const jumped = remote.onGround && data.onGround === false && (Number(data.vy) || 0) > 1;
     if (startedAttack) remote.attackAnim = 0.42;
     remote.action = typeof data.action === 'string' ? data.action : 'idle';
@@ -338,7 +340,9 @@
     remote.onGround = !!data.onGround;
     remote.sneaking = !!data.sneaking;
     remote.sprinting = !!data.sprinting;
+    remote.riding = data.riding === 'minecart' ? 'minecart' : null;
     remote.held = Number.isInteger(data.held) ? data.held : 0;
+    remote.offhand = Number.isInteger(data.offhand) ? data.offhand : 0;
     remote.skin = safeSkin(data.skin || remote.skin);
     remote.modelType = safeModelType(data.modelType || remote.modelType);
     remote.equipment = Array.isArray(data.equipment) ? data.equipment.slice(0, 4) : remote.equipment;
@@ -349,7 +353,7 @@
     remote.dead = !!data.dead;
     if (typeof Sound !== 'undefined' && Sound.emit) {
       if (startedAttack) Sound.emit('combat.swing', { x: remote.x, y: remote.y + 1.3, z: remote.z, volume: 0.34 });
-      if (changedHeld) Sound.emit('item.equip', { x: remote.x, y: remote.y + 1.1, z: remote.z, volume: 0.3 });
+      if (changedHeld || changedOffhand) Sound.emit('item.equip', { x: remote.x, y: remote.y + 1.1, z: remote.z, volume: 0.3 });
       if (jumped) Sound.emit('player.jump', { x: remote.x, y: remote.y, z: remote.z, volume: 0.3 });
     }
   }
@@ -418,7 +422,8 @@
       else setPositionTarget(entity, x, y, z);
       entity.vx = Number(data.vx) || 0; entity.vy = Number(data.vy) || 0; entity.vz = Number(data.vz) || 0;
       entity.netVx = entity.vx; entity.netVy = entity.vy; entity.netVz = entity.vz;
-      entity.targetYaw = Number(data.yaw) || entity.targetYaw;
+      const yaw = Number(data.yaw);
+      if (Number.isFinite(yaw)) entity.targetYaw = yaw;
       entity.hp = Number(data.hp) || 0; entity.fuse = data.fuse;
       entity.stuck = !!data.stuck;
       entity.value = Math.max(1, Number(data.value) || entity.value || 1);
@@ -508,6 +513,8 @@
         target.flash = 0.18; target.hurtAnim = 0.3;
       }
       if (typeof Network.onAttackResult === 'function') Network.onAttackResult(message);
+    } else if (message.t === 'station_result') {
+      if (typeof Network.onStationResult === 'function') Network.onStationResult(message);
     } else if (message.t === 'chat') {
       if (typeof Network.onChat === 'function') Network.onChat(message);
     } else if (message.t === 'container') {
@@ -646,6 +653,7 @@
     return {
       hp: player.hp, hunger: player.hunger, saturation: player.saturation, air: player.air,
       hotbar: player.hotbar, inv: safeInventory || player.inv, equipment: player.equipment,
+      offhand: player.offhand,
       cursor: player.cursor,
       xpLevel: player.xpLevel, xpProgress: player.xpProgress,
       statusEffects: player.statusEffects, spawn: player.spawn,
@@ -675,6 +683,7 @@
           yaw: player.yaw, pitch: player.pitch, speed: Math.hypot(player.vx || 0, player.vz || 0),
           action: player.handAction || 'idle', actionPhase: U.clamp((player.handActionTime || 0) / duration, 0, 1),
           blocking: !!player.isBlocking,
+          riding: player.riding === 'minecart' ? 'minecart' : null,
           onGround: !!player.onGround, sneaking: !!player.isSneaking, sprinting: !!player.isSprinting,
           skin: safeSkin(player.skin), modelType: safeModelType(player.modelType),
           hotbar: player.hotbar, latency,
@@ -810,7 +819,7 @@
 
   const Network = {
     protocol: PROTOCOL,
-    onStatus: null, onProfile: null, onPosition: null, onCombat: null, onAttackResult: null,
+    onStatus: null, onProfile: null, onPosition: null, onCombat: null, onAttackResult: null, onStationResult: null,
     onChat: null, onContainer: null, onExplosion: null, onSound: null, onMining: null, onReconnect: null, onWorldState: null,
     connect, bindWorld, tick, attackTarget,
     getPlayerName: playerName, setPlayerName,
@@ -823,7 +832,7 @@
       });
     },
     dropInventorySlot(source, index, count, stack) {
-      if (source !== 'inv' && source !== 'armor' && source !== 'cursor') return false;
+      if (source !== 'inv' && source !== 'armor' && source !== 'offhand' && source !== 'cursor') return false;
       return send({
         t: 'action', action: 'drop_slot', source, inventoryRevision,
         index: Number.isInteger(index) ? index : 0,
@@ -853,6 +862,8 @@
       return send({ t: 'action', action: 'block_state', active: !!active, hotbar: U.clamp(hotbar | 0, 0, 8) });
     },
     setHeldSlot(hotbar) { return send({ t: 'action', action: 'held_slot', hotbar: U.clamp(hotbar | 0, 0, 8) }); },
+    mountMinecart(x, y, z) { return send({ t:'action', action:'mount_minecart', x, y, z, inventoryRevision }); },
+    dismountMinecart() { return send({ t:'action', action:'dismount_minecart', inventoryRevision }); },
     craft(grid, shift) {
       if (!Array.isArray(grid)) return 0;
       const cleanGrid = grid.map(stack => stack ? { id: stack.id, n: stack.n } : null);

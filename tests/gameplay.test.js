@@ -78,13 +78,26 @@ function loadGameCore(options) {
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  const files = ['util', 'noise', 'textures', 'resource-pack', 'blocks', 'model-loader', 'gl', 'world', 'physics', 'mesher', 'entities', 'player', 'renderer', 'craft', 'save'];
+  const files = ['util', 'vanilla', 'noise', 'textures', 'resource-pack', 'blocks', 'model-loader', 'gl', 'world', 'physics', 'mesher', 'entities', 'player', 'renderer', 'craft', 'save'];
   if (options && options.ui) files.push('ui');
   for (const file of files) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', file + '.js'), 'utf8'), context, { filename: file + '.js' });
   }
   return sandbox;
 }
+
+test('shared 1.12.2 rules preserve tick motion, combat scaling and armor toughness', () => {
+  const { Vanilla, Items } = loadGameCore();
+  assert.equal(Vanilla.VERSION, '1.12.2');
+  assert.ok(Math.abs(Vanilla.airVerticalVelocity(0, 0.05) + 1.568) < 1e-9);
+  assert.ok(Math.abs(Vanilla.airVerticalVelocity(Vanilla.MOVEMENT.jumpVelocity, 0.05) - 6.664) < 1e-9);
+  assert.ok(Math.abs(Vanilla.attackScale(0.5) - 0.4) < 1e-9);
+  assert.ok(Math.abs(Vanilla.sharpnessBonus(3) - 2) < 1e-9);
+  assert.ok(Math.abs(Vanilla.applyArmor(10, 20, 8) - 3) < 1e-9);
+  assert.equal(Items.get(Items.IT.AXE_STONE).tool.damage, 9);
+  assert.equal(Items.get(Items.IT.HOE_DIAMOND).tool.attackSpeed, 4);
+  assert.equal(Items.get(Items.IT.CHEST_DIAMOND).armor.toughness, 2);
+});
 
 test('original resource pack switches HUD icons and widgets to the 1.12.2 GUI sheets', async () => {
   const { UI } = loadGameCore({ ui: true });
@@ -129,6 +142,9 @@ test('new item registry, textures, drops, recipes and smelting form survival loo
   }
   assert.ok(Textures.packTextureInfo('original_1_12', 'oak_door').path.endsWith('/items/door_wood.png'));
   assert.ok(Textures.packTextureInfo('original_1_12', 'iron_door').path.endsWith('/items/door_iron.png'));
+  const xpOrbTexture = Textures.packTextureInfo('original_1_12', 'xp_orb');
+  assert.ok(xpOrbTexture.path.endsWith('/entity/experience_orb.png'));
+  assert.deepEqual(Array.from(xpOrbTexture.source), [16, 0, 16, 16]);
   for (const name of [
     'zombie_head_front', 'zombie_body_back', 'zombie_arm_left', 'zombie_leg_right',
     'skeleton_head_front', 'skeleton_body_top', 'skeleton_limb_right',
@@ -144,6 +160,8 @@ test('new item registry, textures, drops, recipes and smelting form survival loo
     'cow_horn_front', 'cow_udder_top', 'cow_udder_bottom',
     'sheep_wool_head_front', 'sheep_wool_leg_front',
     'chicken_body_front', 'chicken_head_left', 'chicken_wing_right',
+    'horse_original_body_front', 'horse_original_head_front',
+    'horse_original_mane_back', 'horse_original_hoof_bottom',
   ]) assert.equal(Textures.packHasTexture('original_1_12', name), true, 'missing original mob texture ' + name);
   const textureNames = new Set(Textures.names());
   for (const block of Object.values(Blocks.all)) {
@@ -168,6 +186,14 @@ test('new item registry, textures, drops, recipes and smelting form survival loo
   assert.equal(Blocks.ID.GRINDSTONE, 94);
   assert.equal(Blocks.ID.SMITHING_TABLE, 95);
   assert.equal(Blocks.ID.SMOKER, 96);
+  assert.equal(Blocks.ID.BIRCH_LOG, 97);
+  assert.equal(Blocks.ID.BIRCH_LEAVES, 98);
+  assert.equal(Blocks.ID.RAIL, 99);
+  assert.equal(Blocks.get(Blocks.ID.RAIL).shape, 'rail');
+  assert.equal(Blocks.get(Blocks.ID.RAIL).solid, false);
+  assert.equal(Items.get(Items.IT.SHIELD).shield, true);
+  assert.equal(Items.durabilityOf(Items.IT.SHIELD), 336);
+  assert.equal(Items.get(Items.IT.MINECART).minecart, true);
   assert.equal(Items.get(Items.IT.EGG).throwable, 'egg');
   assert.equal(Items.get(Items.IT.ENDER_PEARL).throwable, 'ender_pearl');
   assert.equal(Items.IT.REDSTONE, 323);
@@ -204,6 +230,25 @@ test('new item registry, textures, drops, recipes and smelting form survival loo
     { id: P, n: 1 }, { id: P, n: 1 }, { id: P, n: 1 },
   ]);
   assert.equal(stairs.out.id, Blocks.ID.OAK_STAIRS);
+
+  const shield = Craft.match([
+    { id: P, n: 1 }, { id: Items.IT.IRON_INGOT, n: 1 }, { id: P, n: 1 },
+    { id: P, n: 1 }, { id: P, n: 1 }, { id: P, n: 1 },
+    null, { id: P, n: 1 }, null,
+  ]);
+  assert.equal(shield.out.id, Items.IT.SHIELD);
+  const minecart = Craft.match([
+    { id: Items.IT.IRON_INGOT, n: 1 }, null, { id: Items.IT.IRON_INGOT, n: 1 },
+    { id: Items.IT.IRON_INGOT, n: 1 }, { id: Items.IT.IRON_INGOT, n: 1 }, { id: Items.IT.IRON_INGOT, n: 1 },
+    null, null, null,
+  ]);
+  assert.equal(minecart.out.id, Items.IT.MINECART);
+  const rail = Craft.match([
+    { id: Items.IT.IRON_INGOT, n: 1 }, null, { id: Items.IT.IRON_INGOT, n: 1 },
+    { id: Items.IT.IRON_INGOT, n: 1 }, { id: Items.IT.STICK, n: 1 }, { id: Items.IT.IRON_INGOT, n: 1 },
+    { id: Items.IT.IRON_INGOT, n: 1 }, null, { id: Items.IT.IRON_INGOT, n: 1 },
+  ]);
+  assert.equal(rail.out.id, Blocks.ID.RAIL);
 
   const I = Items.IT.IRON_INGOT;
   const helmet = Craft.match([
@@ -260,10 +305,28 @@ test('original 1.12.2 model sizes are the global entity baseline', () => {
   assert.equal(Entities.modelStats('chicken').parts, 8);
   assert.deepEqual(Array.from(Entities.modelStats('chicken').headPivot), [0, 9, -4]);
   assert.deepEqual(Array.from(Entities.modelStats('wolf').sizes[2]), [3, 3, 4]);
+  const horseStats = Entities.modelStats('horse');
+  assert.equal(horseStats.parts, 23);
+  assert.deepEqual(Array.from(horseStats.sizes[0]), [10, 10, 24]);
+  assert.deepEqual(Array.from(horseStats.centers[0]), [0, 16, 2]);
+  assert.deepEqual(Array.from(horseStats.headPivot), [0, 20, -10]);
+  assert.deepEqual(Array.from(horseStats.sizes[13]), [4, 14, 8]);
+  assert.deepEqual(Array.from(horseStats.sizes[15]), [5, 5, 7]);
+  assert.deepEqual(Array.from(horseStats.sizes[16]), [4, 3, 6]);
+  assert.equal(horseStats.textures[15].front, 'horse_original_head_front');
+  const horseBody = Textures.packTextureInfo('original_1_12', 'horse_original_body_front');
+  const horseHead = Textures.packTextureInfo('original_1_12', 'horse_original_head_front');
+  const horseMane = Textures.packTextureInfo('original_1_12', 'horse_original_mane_back');
+  const horseHoof = Textures.packTextureInfo('original_1_12', 'horse_original_hoof_bottom');
+  assert.ok(horseBody.path.endsWith('/entity/horse/horse_brown.png'));
+  assert.deepEqual(Array.from(horseBody.source), [24, 58, 10, 10]);
+  assert.deepEqual(Array.from(horseHead.source), [7, 7, 5, 5]);
+  assert.deepEqual(Array.from(horseMane.source), [68, 4, 2, 16]);
+  assert.deepEqual(Array.from(horseHoof.source), [86, 51, 4, 4]);
   assert.deepEqual(Array.from(Entities.modelStats('player').sizes[1]), [8.5, 12.5, 4.5]);
   assert.deepEqual(Array.from(Entities.modelStats('spider').sizes[0]), [8, 8, 8]);
   assert.deepEqual(Array.from(Entities.modelStats('spider').sizes[3]), [16, 2, 2]);
-  assert.deepEqual(Array.from(Entities.modelStats('slime').sizes[0]), [9, 9, 9]);
+  assert.deepEqual(Array.from(Entities.modelStats('slime').sizes[0]), [8, 8, 8]);
   assert.deepEqual(Array.from(Entities.modelStats('enderman').sizes[0]), [8, 12, 4]);
   assert.deepEqual(Array.from(Entities.modelStats('enderman').sizes[2]), [2, 30, 2]);
   assert.deepEqual(Array.from(Entities.modelStats('iron_golem').sizes[0]), [18, 12, 11]);
@@ -287,10 +350,13 @@ test('original 1.12.2 model sizes are the global entity baseline', () => {
 
   const farmer = Entities.spawnMob('villager', 2, 1, 0);
   farmer.profession = 'farmer';
+  const horse = Entities.spawnMob('horse', 4, 1, 0);
   assert.equal(Entities.setModelProfile('default'), true);
   assert.equal(pig.model.parts.length, 10);
+  assert.equal(horse.model.parts.length, 11);
   assert.equal(Entities.setModelProfile('original'), true);
   assert.equal(pig.model.parts.length, 7);
+  assert.equal(horse.model.parts.length, 23);
   assert.equal(farmer.model.parts[1].tex.front, 'villager_original_farmer_head_front');
   assert.equal(farmer.model.parts[6].tex.back, 'villager_original_farmer_robe_back');
   Entities.clear();
@@ -668,20 +734,46 @@ test('blocking, stuck arrows and experience orbs follow survival combat rules', 
   player.inv.fill(null);
   player.inv[0] = Items.makeStack(Items.IT.SWORD_IRON, 1);
   player.updateUseActions(0.1, { use: true });
-  assert.equal(player.isBlocking, true);
+  assert.equal(player.isBlocking, false, '1.12.2 swords no longer provide legacy blocking');
+  player.offhand = Items.makeStack(Items.IT.SHIELD, 1);
+  player.updateUseActions(0.1, { use: true });
+  assert.equal(player.isBlocking, true, 'a sword should leave use available to an offhand shield');
   const swordDurability = player.held().dur;
+  const shieldDurability = player.offhand.dur;
   player.damage(8, 'mob');
-  assert.equal(player.hp, 16, 'sword blocking should halve mob damage');
-  assert.equal(player.held().dur, swordDurability, 'blocking must not consume sword durability');
+  assert.equal(player.hp, 20, 'a raised shield should stop blockable frontal damage');
+  assert.equal(player.offhand.dur, shieldDurability - 9, 'blocking consumes incoming damage plus one durability');
+  assert.equal(player.held().dur, swordDurability, 'blocking must not damage the main-hand sword');
   assert.ok(player.blockHitTime > 0 && Entities.particles.length > 0, 'a successful block should produce feedback');
   player.hurtTime = 0;
   player.hp = 20;
+  player.yaw = 0;
+  player.damage(4, 'mob', { x: player.x, z: player.z + 2 });
+  assert.ok(player.hp < 20, 'a shield must not block an attacker outside its frontal 100 degree arc');
+  assert.equal(player.offhand.dur, shieldDurability - 9, 'rear damage must not consume shield durability');
+  player.hurtTime = 0;
+  player.hp = 20;
   player.damage(8, 'explode');
-  assert.equal(player.hp, 16, 'legacy sword blocking should also reduce explosion damage');
+  assert.equal(player.hp, 20, 'a raised shield should also stop blockable explosion damage');
+  player.shieldDisabledTime = 5;
+  player.setBlocking(false, false);
+  player.updateUseActions(0.1, { use: true });
+  assert.equal(player.isBlocking, false, 'a disabled shield must stay lowered while use is held');
+  player.shieldDisabledTime = 0;
+  player.updateUseActions(0.1, { use: true });
+  assert.equal(player.isBlocking, true, 'the shield should work again after its cooldown');
+  player.inv[0] = Items.makeStack(Items.IT.BREAD, 1);
+  player.updateUseActions(0.1, { use: true });
+  assert.equal(player.isBlocking, false, 'main-hand food should take priority over the offhand shield');
+
+  const savedGuard = player.serialize();
+  const restoredGuard = new Player(world);
+  restoredGuard.deserialize(savedGuard);
+  assert.equal(restoredGuard.offhand.id, Items.IT.SHIELD, 'offhand items should survive a save roundtrip');
 
   const mover = new Player(world);
   mover.inv.fill(null);
-  mover.inv[0] = Items.makeStack(Items.IT.SWORD_IRON, 1);
+  mover.inv[0] = Items.makeStack(Items.IT.SHIELD, 1);
   mover.x = 10.5; mover.y = y; mover.z = 10.5; mover.onGround = true;
   for (let x = 9; x <= 11; x++) for (let z = 9; z <= 11; z++) world.setBlock(x, y - 1, z, Blocks.ID.STONE);
   mover.mining = { x: 1, y: 1, z: 1, progress: 0, total: 1 };
@@ -690,11 +782,11 @@ test('blocking, stuck arrows and experience orbs follow survival combat rules', 
   assert.equal(mover.mining, null, 'starting a block should cancel mining');
   mover.update(0.05, { fwd: true, sprint: true });
   assert.equal(mover.isSprinting, false);
-  assert.ok(Math.hypot(mover.vx, mover.vz) < 1.1, 'blocking movement should use the legacy item-use slowdown');
+  assert.ok(Math.hypot(mover.vx, mover.vz) < 1.1, 'blocking movement should use the item-use slowdown');
   assert.ok(mover.blockBlend > 0 && mover.blockBlend < 1);
   mover.setBlocking(false, false);
   mover.updateHandAnimation(0.11);
-  assert.equal(mover.blockBlend, 0, 'lowering the sword should finish its reverse blend');
+  assert.equal(mover.blockBlend, 0, 'lowering the shield should finish its reverse blend');
 
   Entities.clear();
   world.setBlock(6, y, 8, Blocks.ID.STONE);
@@ -711,6 +803,25 @@ test('blocking, stuck arrows and experience orbs follow survival combat rules', 
   Entities.update(world, player, 0.05, 1);
   assert.equal(collected, 5);
   Entities.onXP = null;
+});
+
+test('experience orbs render with a dedicated texture instead of glowstone dust', () => {
+  const { World, Entities, Textures } = loadGameCore();
+  Textures.build();
+  const world = new World(1841);
+  world.ensureChunk(0, 0);
+  const y = world.genHeight(8, 8) + 1;
+  Entities.clear();
+  const orb = Entities.spawnXP(8.5, y, 8.5, 5);
+  orb.age = 1;
+  const geometry = Entities.buildGeometry(world, 8.5, y + 1.6, 12).normal;
+  const xpUv = Textures.uv('xp_orb');
+  const glowstoneUv = Textures.uv('glowstone_dust');
+  assert.equal(orb.itemId, undefined, 'rendering must not turn an XP orb into an item entity');
+  assert.ok(geometry.count >= 12, 'the XP orb should have visible front and back faces');
+  assert.ok(Math.abs(geometry.verts[3] - xpUv[0]) < 1e-6 && Math.abs(geometry.verts[4] - xpUv[3]) < 1e-6,
+    'the XP orb geometry must use the dedicated XP texture');
+  assert.notDeepEqual(Array.from(xpUv), Array.from(glowstoneUv));
 });
 
 test('respawning clears airborne movement and active hand states at the exact spawn point', () => {
@@ -752,7 +863,7 @@ test('respawning clears airborne movement and active hand states at the exact sp
   assert.equal(player.y, y);
 });
 
-test('remote players visibly raise their held sword while blocking', () => {
+test('remote players visibly raise an offhand shield while keeping their main-hand item', () => {
   const { World, Entities, Items, Textures } = loadGameCore();
   Textures.build();
   const world = new World(186);
@@ -761,7 +872,7 @@ test('remote players visibly raise their held sword while blocking', () => {
   const remote = {
     id: 'guard-player', type: 'remote', kind: 'player', x: 8.5, y, z: 8.5,
     yaw: 0, headYaw: 0, headPitch: 0, age: 1, animPhase: 0, animSpeed: 0,
-    attackAnim: 0, onGround: true, dead: false, held: Items.IT.SWORD_IRON,
+    attackAnim: 0, onGround: true, dead: false, held: Items.IT.SWORD_IRON, offhand: Items.IT.SHIELD,
     action: 'idle', blocking: false, blockBlend: 0,
   };
   Entities.clear();
@@ -771,13 +882,13 @@ test('remote players visibly raise their held sword while blocking', () => {
   const guardingGeometry = Entities.buildGeometry(world, 8.5, y + 1.6, 12).normal;
   const guarding = Array.from(guardingGeometry.verts);
   Entities.setRemoteProvider(null);
-  assert.ok(guardingGeometry.count > 444, 'the held sword should include front, back and pixel-thickness edge faces');
+  assert.ok(guardingGeometry.count > 500, 'both held items should include visible front, back and edge faces');
   let armMotion = 0;
-  const armStart = 10 * 24 * 7;
+  const armStart = 8 * 24 * 7;
   for (let i = armStart; i < armStart + 24 * 7; i += 7) {
     armMotion = Math.max(armMotion, Math.abs(guarding[i + 1] - idle[i + 1]), Math.abs(guarding[i + 2] - idle[i + 2]));
   }
-  assert.ok(armMotion > 0.2, 'the sword arm should visibly move into a guard pose');
+  assert.ok(armMotion > 0.2, 'the left arm should visibly move into the offhand guard pose');
   const swordUv = Textures.uv(Items.get(Items.IT.SWORD_IRON).tex);
   const backStart = (12 * 24 + 4) * 7;
   const expectedBackUv = [
@@ -912,10 +1023,11 @@ test('signature mob silhouettes use original part counts and baby head proportio
     mob.onGround = true;
     return Entities.buildGeometry(world, 8.5, y + 1, 12).normal.count;
   };
-  assert.equal(countFor('spider'), 396, 'spider should have a head, neck, abdomen and eight legs');
+  assert.equal(countFor('spider'), 432, 'spider should include the original eye overlay above its head, neck, abdomen and eight legs');
   assert.equal(countFor('squid'), 324, 'squid should have a body and eight tentacles');
   assert.equal(countFor('blaze'), 468, 'blaze should have a head and twelve rods');
   assert.equal(countFor('slime'), 180, 'slime should include its translucent shell, core and face');
+  assert.equal(countFor('horse'), 828, 'horse should include its segmented legs, muzzle, ears, mane and tail');
 
   Entities.clear();
   const adult = Entities.spawnMob('cow', 8.5, y, 8.5);
@@ -1046,7 +1158,7 @@ test('dungeons and planned villages generate deterministic structures, POIs and 
   }
   assert.ok(plan, 'a complete biome-valid village plan should be discoverable');
   assert.ok(plan.roads.length >= plan.buildings.length + 2);
-  assert.equal(plan.meeting.block, Blocks.ID.BELL);
+  assert.equal(plan.meeting.block, Blocks.ID.TORCH, '1.12.2 villages use a well marker instead of a modern bell');
   assert.ok(plan.residents.every(resident => resident.home && resident.profession));
 
   const chunkKeys = new Set([`${plan.x >> 4},${plan.z >> 4}`]);
@@ -1059,7 +1171,7 @@ test('dungeons and planned villages generate deterministic structures, POIs and 
     const [cx, cz] = key.split(',').map(Number);
     first.ensureChunk(cx, cz);
   }
-  assert.equal(first.getBlock(plan.meeting.x, plan.meeting.y, plan.meeting.z), Blocks.ID.BELL);
+  assert.equal(first.getBlock(plan.meeting.x, plan.meeting.y, plan.meeting.z), Blocks.ID.TORCH);
   for (const job of plan.jobs) assert.equal(first.getBlock(job.x, job.y, job.z), job.block);
   const villageChest = Array.from(first.be.entries()).find(([, be]) => be.type === 'chest' && be.slots.some(stack => stack && stack.id === Items.IT.BREAD));
   assert.ok(villageChest, 'village houses should include deterministic loot');
@@ -1233,7 +1345,8 @@ test('tree density stays biome-specific without adjacent trunks', () => {
     const biome = world.biomeAt(x, z);
     const entry = stats.get(biome) || { columns:0, trees:0 };
     entry.columns++;
-    if (world.treeAt(x, z)) {
+    const tree = world.treeAt(x, z);
+    if (tree) {
       entry.trees++;
       roots.add(x + ',' + z);
     }
@@ -1325,6 +1438,48 @@ test('ground mobs automatically jump one-block steps but not two-block walls', (
     Entities.clear();
     Entities.setMobSpawning(true);
   }
+});
+
+test('player auto-jump clears a one-block obstacle only when enabled', () => {
+  const { World, Player, Blocks } = loadGameCore();
+  const world = new World(414);
+  world.ensureChunk(0, 0);
+  const y = 200;
+  for (let x = 6; x <= 10; x++) for (let z = 5; z <= 13; z++) {
+    world.setBlock(x, y - 1, z, Blocks.ID.STONE);
+    for (let clearY = y; clearY <= y + 3; clearY++) world.setBlock(x, clearY, z, Blocks.ID.AIR);
+  }
+  world.setBlock(8, y, 8, Blocks.ID.STONE);
+
+  const run = (autoJumpEnabled) => {
+    const player = new Player(world);
+    player.x = 8.5; player.y = y; player.z = 10.5;
+    player.vx = 0; player.vy = 0; player.vz = 0;
+    player.yaw = 0; player.onGround = true;
+    player.autoJumpEnabled = autoJumpEnabled;
+    let highestY = player.y;
+    let clearedObstacle = false;
+    for (let tick = 0; tick < 80; tick++) {
+      player.update(0.05, { fwd: true, jump: false });
+      highestY = Math.max(highestY, player.y);
+      if (player.z < 7.7) {
+        clearedObstacle = true;
+        break;
+      }
+    }
+    return { player, highestY, clearedObstacle };
+  };
+
+  const enabled = run(true);
+  const disabled = run(false);
+  assert.ok(disabled.highestY <= y + 1e-6, 'disabling auto-jump must keep the player grounded');
+  assert.equal(disabled.clearedObstacle, false,
+    `a grounded player should remain blocked when auto-jump is disabled (z=${disabled.player.z.toFixed(3)}, maxY=${disabled.highestY.toFixed(3)})`);
+
+  assert.ok(enabled.highestY > y + 1,
+    `auto-jump must retain enough height to clear a full block (maxY=${enabled.highestY.toFixed(3)})`);
+  assert.equal(enabled.clearedObstacle, true,
+    `auto-jump should carry the player completely past a one-block obstacle (z=${enabled.player.z.toFixed(3)}, maxY=${enabled.highestY.toFixed(3)})`);
 });
 
 test('sunlit undead burn to death while covered undead remain unharmed', () => {
@@ -1527,7 +1682,8 @@ test('armor, food, enchanting and repair preserve metadata and costs', () => {
   player.updateArmorValue();
   player.damage(10, 'mob');
   assert.equal(player.armor, 20);
-  assert.equal(player.hp, 18);
+  assert.equal(player.armorToughness, 8);
+  assert.ok(Math.abs(player.hp - 17) < 1e-9);
 
   player.equipment.fill(null);
   player.updateArmorValue();

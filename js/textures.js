@@ -23,6 +23,17 @@
     { id: 'miner', name: '矿工', skin: '#b87858', skinHi: '#d59672', hair: '#2f241e', hairDark: '#18130f', shirt: '#b28a32', shirtDark: '#6f521d', pants: '#3d5568', shoe: '#252b30' },
     { id: 'wanderer', name: '旅行者', skin: '#8f5f46', skinHi: '#b57b5b', hair: '#241a18', hairDark: '#100c0b', shirt: '#8f3f3f', shirtDark: '#562626', pants: '#353c58', shoe: '#1e2232' },
   ]);
+  // Four 64px skin pages use only the left half of the final four atlas rows.
+  const PRIMARY_NORMAL_SLOTS = GRID * (GRID - 4);
+  const SKIN_TILE_COLUMNS = SKIN_PROFILES.length * 4;
+  const EXTRA_NORMAL_COLUMNS = GRID - SKIN_TILE_COLUMNS;
+  const MAX_NORMAL_SLOTS = PRIMARY_NORMAL_SLOTS + EXTRA_NORMAL_COLUMNS * 4;
+  function painterAtlasSlot(index) {
+    if (index < PRIMARY_NORMAL_SLOTS) return index;
+    const extra = index - PRIMARY_NORMAL_SLOTS;
+    return (GRID - 4 + ((extra / EXTRA_NORMAL_COLUMNS) | 0)) * GRID
+      + SKIN_TILE_COLUMNS + extra % EXTRA_NORMAL_COLUMNS;
+  }
   const SKIN_PROFILE_INDEX = new Map(SKIN_PROFILES.map((profile, index) => [profile.id, index]));
   const SKIN_UV = Object.freeze({
     head: { right:[0,8,8,8], front:[8,8,8,8], left:[16,8,8,8], back:[24,8,8,8], top:[8,0,8,8], bottom:[16,0,8,8] },
@@ -220,6 +231,31 @@
       if (P.rand() < 0.14) P.px(x, y, A(C.leafSpruce[0], 0));
       else P.px(x, y, C.leafSpruce[(P.rand() * C.leafSpruce.length) | 0]);
     }
+  });
+  def('birch_log_side', (P) => {
+    P.fill(hx('#d8d5c8'));
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      if (P.rand() < 0.09) P.px(x, y, P.rand() < 0.55 ? hx('#3b3934') : hx('#aaa79c'));
+    }
+    P.rect(0, 0, 1, 16, hx('#c2bfb4')); P.rect(15, 0, 1, 16, hx('#ece9dc'));
+  });
+  def('birch_log_top', (P) => {
+    P.fill(hx('#d4c8a8')); P.border(hx('#b4ad9e'));
+    P.rect(3, 3, 10, 10, hx('#c6b78f')); P.rect(6, 6, 4, 4, hx('#a9976e'));
+  });
+  def('birch_leaves', (P) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      if (P.rand() < 0.14) P.px(x, y, A(hx('#5f9b45'), 0));
+      else P.px(x, y, [hx('#5e9f45'), hx('#72ad50'), hx('#4a8739')][(P.rand() * 3) | 0]);
+    }
+  });
+  def('rail', (P) => {
+    P.fill([0, 0, 0, 0]);
+    for (let y = 0; y < 16; y++) {
+      P.px(2, y, hx('#76716a')); P.px(3, y, hx('#c7c2b7'));
+      P.px(12, y, hx('#76716a')); P.px(13, y, hx('#c7c2b7'));
+    }
+    for (let y = 1; y < 16; y += 4) P.rect(3, y, 10, 2, hx('#7c572d'));
   });
   def('planks', (P) => {
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
@@ -900,6 +936,18 @@
     P.rect(4, 4, 3, 9, hx('#44484b')); P.rect(6, 3, 6, 3, hx('#c6cbcd')); P.rect(10, 5, 3, 6, hx('#8a9093'));
     P.px(11, 3, hx('#f3f5f5')); P.px(5, 12, hx('#222629'));
   });
+  def('shield', (P) => {
+    P.fill([0, 0, 0, 0]);
+    P.rect(3, 1, 10, 11, hx('#6f4a28')); P.rect(4, 2, 8, 9, hx('#a77943'));
+    P.rect(7, 2, 2, 9, hx('#d6b16d')); P.rect(4, 1, 8, 1, hx('#d5d5cf'));
+    P.rect(4, 12, 8, 2, hx('#6f4a28')); P.rect(5, 14, 6, 1, hx('#4b321e'));
+  });
+  def('minecart', (P) => {
+    P.fill([0, 0, 0, 0]);
+    P.rect(2, 5, 12, 7, hx('#7f8587')); P.rect(3, 6, 10, 4, hx('#b8bdbd'));
+    P.rect(4, 7, 8, 3, hx('#565b5d')); P.rect(2, 12, 12, 2, hx('#3d4142'));
+    P.rect(3, 14, 3, 2, hx('#202223')); P.rect(10, 14, 3, 2, hx('#202223'));
+  });
   def('bow', (P) => {
     P.fill([0, 0, 0, 0]);
     const wood = hx('#8b5a2b'), hi = hx('#bd8240'), line = hx('#e5e2d6');
@@ -1514,6 +1562,13 @@
     });
   def('cat', (P) => { P.noise([hx('#c98a43'), hx('#e0a258'), hx('#9b622f')]); P.rect(0, 12, 16, 4, hx('#7c4b27')); });
   def('cat_face', (P) => { P.noise([hx('#d99a50'), hx('#b87538')]); P.rect(3, 5, 2, 2, hx('#5bc5a1')); P.rect(11, 5, 2, 2, hx('#5bc5a1')); P.px(8, 9, hx('#704139')); });
+  def('rabbit', (P) => { P.noise([hx('#9b7658'), hx('#b38b68'), hx('#7f6048')]); P.speck(hx('#d2b493'), 8); });
+  def('rabbit_face', (P) => { P.noise([hx('#a98262'), hx('#c09b76')]); P.rect(3, 5, 2, 2, hx('#241b18')); P.rect(11, 5, 2, 2, hx('#241b18')); P.px(8, 10, hx('#e0a0a0')); });
+  def('rabbit_tail', (P) => { P.noise([hx('#e7e1d5'), hx('#cfc7b9')]); });
+  def('horse', (P) => { P.noise([hx('#7b492d'), hx('#955d38'), hx('#623720')]); P.speck(hx('#ad7650'), 9); });
+  def('horse_face', (P) => { P.noise([hx('#855034'), hx('#a86e48')]); P.rect(3, 6, 2, 2, hx('#191514')); P.rect(11, 6, 2, 2, hx('#191514')); P.rect(5, 12, 2, 2, hx('#2d211c')); P.rect(9, 12, 2, 2, hx('#2d211c')); });
+  def('horse_tail', (P) => { P.noise([hx('#34231c'), hx('#493127')]); });
+  def('horse_mane', (P) => { P.noise([hx('#302019'), hx('#4a3024')]); });
   directionalMobTextures('cat', ['body', 'head', 'leg', 'tail', 'muzzle', 'ear'],
     [hx('#c98a43'), hx('#e0a258'), hx('#9b622f')], (P, part, face) => {
       if (part === 'head' && face === 'front') {
@@ -1532,6 +1587,22 @@
   def('dragon_body', (P) => { P.noise([hx('#19121f'), hx('#25182d'), hx('#0f0b14')]); P.speck(hx('#54305f'), 18); });
   def('dragon_face', (P) => { P.noise([hx('#19121f'), hx('#25182d')]); P.rect(2, 5, 5, 2, hx('#c65be1')); P.rect(9, 5, 5, 2, hx('#c65be1')); P.px(5, 5, hx('#f0b0ff')); P.px(10, 5, hx('#f0b0ff')); });
   def('dragon_wing', (P) => { P.noise([hx('#24152b'), hx('#321d3c'), hx('#160d1c')]); for (let x = 2; x < 16; x += 4) P.rect(x, 0, 1, 16, hx('#54315f')); });
+  directionalMobTextures('horse_original', [
+    'body', 'leg', 'shin', 'head', 'upper_mouth', 'lower_mouth', 'ear', 'neck',
+  ], [hx('#7b492d'), hx('#955d38'), hx('#623720')], (P, part, face) => {
+    if (part === 'head' && face === 'front') {
+      P.rect(2, 5, 3, 2, hx('#171313'));
+      P.rect(11, 5, 3, 2, hx('#171313'));
+    }
+    if ((part === 'upper_mouth' || part === 'lower_mouth') && face === 'front') {
+      P.rect(3, 8, 2, 2, hx('#30201a'));
+      P.rect(11, 8, 2, 2, hx('#30201a'));
+    }
+    if (part === 'ear' && face === 'front') P.rect(5, 2, 6, 12, hx('#6d3d2b'));
+  });
+  directionalMobTextures('horse_original', ['mane', 'tail'],
+    [hx('#302019'), hx('#493127'), hx('#211713')]);
+  directionalMobTextures('horse_original', ['hoof'], [hx('#292321'), hx('#3a302b'), hx('#1c1817')]);
 
   // ================= build & API =================
   function paintSkinProfile(data, profile) {
@@ -1650,14 +1721,15 @@
       canvas.width = SIZE; canvas.height = SIZE;
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, SIZE, SIZE);
-      if (painters.length > GRID * (GRID - 4)) throw new Error('too many tiles before reserved skin pages: ' + painters.length);
+      if (painters.length > MAX_NORMAL_SLOTS) throw new Error('too many texture tiles: ' + painters.length);
       painters.forEach((p, i) => {
         const img = ctx.createImageData(TILE, TILE);
         const rand = mulberry32(hashName(p.name) ^ 0x9E3779B9);
         p.fn(makeP(img.data, rand));
-        const sx = (i % GRID) * TILE, sy = ((i / GRID) | 0) * TILE;
+        const slot = painterAtlasSlot(i);
+        const sx = (slot % GRID) * TILE, sy = ((slot / GRID) | 0) * TILE;
         ctx.putImageData(img, sx, sy);
-        slotOf.set(p.name, i);
+        slotOf.set(p.name, slot);
       });
       SKIN_PROFILES.forEach((profile, index) => {
         const img = ctx.createImageData(64, 64);
@@ -1828,6 +1900,17 @@
       finally { packLoad = null; }
     },
   };
+
+  def('xp_orb', (P) => {
+    P.fill([0, 0, 0, 0]);
+    for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) {
+      const distance = Math.hypot(x - 7.5, y - 7.5);
+      if (distance > 5.8) continue;
+      const color = distance < 2.2 ? hx('#f7ff72') : distance < 4.2 ? hx('#8de33f') : hx('#3a9b32');
+      P.px(x, y, color);
+    }
+    P.rect(6, 5, 3, 2, hx('#ffffff'));
+  });
 
   // fallback checker tile (registered last)
   def('__fallback', (P) => {

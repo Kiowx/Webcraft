@@ -28,6 +28,7 @@
     BREWING_STAND: 86, IRON_DOOR: 87, IRON_DOOR_TOP: 88, IRON_TRAPDOOR: 89,
     DRAGON_EGG: 90, BELL: 91, COMPOSTER: 92, LECTERN: 93,
     GRINDSTONE: 94, SMITHING_TABLE: 95, SMOKER: 96,
+    BIRCH_LOG: 97, BIRCH_LEAVES: 98, RAIL: 99,
   };
   const IT = {
     STICK: 256, COAL: 257, CHARCOAL: 258, IRON_INGOT: 259, GOLD_INGOT: 260,
@@ -49,6 +50,7 @@
     BLAZE_POWDER: 326, EYE_OF_ENDER: 327, EMERALD: 328, SLIME_BALL: 329,
     NETHER_WART: 330, GLASS_BOTTLE: 331,
     WATER_BOTTLE: 332, AWKWARD_POTION: 333, HEALING_POTION: 334,
+    SHIELD: 335, MINECART: 336,
     HELMET_LEATHER: 340, CHEST_LEATHER: 341, LEGS_LEATHER: 342, BOOTS_LEATHER: 343,
     HELMET_GOLD: 344, CHEST_GOLD: 345, LEGS_GOLD: 346, BOOTS_GOLD: 347,
     HELMET_IRON: 348, CHEST_IRON: 349, LEGS_IRON: 350, BOOTS_IRON: 351,
@@ -96,6 +98,11 @@
     torch: {
       firstPerson: { attach: 'hand', pos: [0.54, -0.52, -0.82], rot: [-0.08, 0.20, 0.52], scale: 0.68, grip: [0, -0.38, 0] },
       thirdPerson: { offset: [0, 0.19, -0.025], rotation: [0, 0, -0.10], scale: 0.55 / 2, model: 'sprite' },
+      ground: { scale: VANILLA_ITEM_GROUND_SCALE }, inventory: { scale: 1, rotation: [0, 0, 0] },
+    },
+    shield: {
+      firstPerson: { attach: 'hand', pos: [0.48, -0.46, -0.82], rot: [0.02, -0.18, 0.08], scale: 0.76, grip: [0, -0.18, 0] },
+      thirdPerson: { offset: [0, 0.18, -0.03], rotation: [0.02, 0.10, -0.12], scale: 0.42, model: 'sprite' },
       ground: { scale: VANILLA_ITEM_GROUND_SCALE }, inventory: { scale: 1, rotation: [0, 0, 0] },
     },
   });
@@ -580,6 +587,19 @@
     tex: { top: 'smoker_top', bottom: 'stone', side: 'smoker_side', front: 'smoker_front' },
     hardness: 3.5, tool: 'pickaxe', needsTool: true, orientable: true, poi: 'butcher',
   });
+  def(ID.BIRCH_LOG, '白桦原木', {
+    tex: { top: 'birch_log_top', bottom: 'birch_log_top', side: 'birch_log_side' },
+    hardness: 2, tool: 'axe', sound: 'wood', flammable: true,
+  });
+  def(ID.BIRCH_LEAVES, '白桦树叶', {
+    tex: T('birch_leaves'), hardness: 0.2, cutout: true, transparent: true, opacity: 1,
+    sound: 'grass', flammable: true, drops: [{ id: ID.SAPLING, n: 1, chance: 0.05 }],
+  });
+  def(ID.RAIL, '铁轨', {
+    shape: 'rail', tex: T('rail'), solid: false, opaque: false, transparent: true, cutout: true,
+    hardness: 0.7, tool: 'pickaxe', needsGround: true, sound: 'metal', orientable: true,
+    collisionBoxes: [], handModel: 'sprite', display: DISPLAY_PRESETS.item,
+  });
   // air
   B[ID.AIR] = { id: 0, name: '空气', shape: 'none', solid: false, opaque: false, opacity: 0, transparent: true, cutout: false, liquid: false, tex: {}, hardness: -1, tool: null, tier: 0, needsTool: false, drops: [], light: 0, sound: 'grass', soundSet: 'grass', replaceable: true, needsGround: false, gravity: false, flammable: false };
   delete ITEMS[ID.AIR];
@@ -686,6 +706,13 @@
     tex: 'healing_potion', stack: 1, returns: IT.GLASS_BOTTLE,
     food: { hunger: 0, saturation: 0, alwaysEat: true, effects: [{ type: 'regeneration', duration: 8, level: 1 }] },
   });
+  item(IT.SHIELD, '盾牌', {
+    tex: 'shield', stack: 1, durability: 336, shield: true, displayKind: 'shield',
+    enchantable: 'tool', repair: ID.PLANKS,
+  });
+  item(IT.MINECART, '矿车', {
+    tex: 'minecart', stack: 1, minecart: true, displayKind: 'item', handPose: HAND_POSES.item,
+  });
 
   // tools: tier index wood0 stone1 iron2 gold3 diamond4; mining power wood0 stone1 iron2 gold1 diamond3
   const TIER_NAMES = ['木', '石', '铁', '金', '钻石'];
@@ -694,17 +721,23 @@
   const TIER_POWER = [0, 1, 2, 1, 3];
   const TIER_DUR = [60, 132, 251, 33, 1562];
   const TIER_REPAIR = [ID.PLANKS, ID.COBBLE, IT.IRON_INGOT, IT.GOLD_INGOT, IT.DIAMOND];
+  // Total attack damage and attacks/second from Java 1.12.2. Material order is
+  // wood, stone, iron, gold, diamond to match the runtime item ids.
   const TOOL_TYPES = [
-    { key: 'pickaxe', name: '镐', base: IT.PICK_WOOD, dmg: 2, attackSpeed: 1.2 },
-    { key: 'axe', name: '斧', base: IT.AXE_WOOD, dmg: 3, attackSpeed: 0.9 },
-    { key: 'shovel', name: '锹', base: IT.SHOVEL_WOOD, dmg: 1, attackSpeed: 1.0 },
-    { key: 'sword', name: '剑', base: IT.SWORD_WOOD, dmg: 4, attackSpeed: 1.6 },
-    { key: 'hoe', name: '锄', base: IT.HOE_WOOD, dmg: 1, attackSpeed: 1.0 },
+    { key: 'pickaxe', name: '镐', base: IT.PICK_WOOD,
+      damage: [2, 3, 4, 2, 5], attackSpeed: [1.2, 1.2, 1.2, 1.2, 1.2] },
+    { key: 'axe', name: '斧', base: IT.AXE_WOOD,
+      damage: [7, 9, 9, 7, 9], attackSpeed: [0.8, 0.8, 0.9, 1.0, 1.0] },
+    { key: 'shovel', name: '锹', base: IT.SHOVEL_WOOD,
+      damage: [2.5, 3.5, 4.5, 2.5, 5.5], attackSpeed: [1, 1, 1, 1, 1] },
+    { key: 'sword', name: '剑', base: IT.SWORD_WOOD,
+      damage: [4, 5, 6, 4, 7], attackSpeed: [1.6, 1.6, 1.6, 1.6, 1.6] },
+    { key: 'hoe', name: '锄', base: IT.HOE_WOOD,
+      damage: [1, 1, 1, 1, 1], attackSpeed: [1, 2, 3, 1, 4] },
   ];
   for (const tt of TOOL_TYPES) {
     for (let t = 0; t < 5; t++) {
       const id = tt.base + t;
-      const swordDmg = [4, 5, 6, 4, 7][t];
       item(id, TIER_NAMES[t] + tt.name, {
         stack: 1,
         tex: tt.key + '_' + TIER_KEYS[t],
@@ -716,9 +749,9 @@
           type: tt.key,
           tier: TIER_POWER[t],
           speed: TIER_SPEED[t],
-          attackSpeed: tt.attackSpeed,
+          attackSpeed: tt.attackSpeed[t],
           durability: TIER_DUR[t],
-          damage: tt.key === 'sword' ? swordDmg : tt.dmg,
+          damage: tt.damage[t],
         },
       });
     }
@@ -731,10 +764,10 @@
     { key: 'boots', name: '靴子', slot: 3 },
   ];
   const ARMOR_MATERIALS = [
-    { key: 'leather', name: '皮革', base: IT.HELMET_LEATHER, points: [1, 3, 2, 1], dur: [55, 80, 75, 65], repair: IT.LEATHER },
-    { key: 'gold', name: '金', base: IT.HELMET_GOLD, points: [2, 5, 3, 1], dur: [77, 112, 105, 91], repair: IT.GOLD_INGOT },
-    { key: 'iron', name: '铁', base: IT.HELMET_IRON, points: [2, 6, 5, 2], dur: [165, 240, 225, 195], repair: IT.IRON_INGOT },
-    { key: 'diamond', name: '钻石', base: IT.HELMET_DIAMOND, points: [3, 8, 6, 3], dur: [363, 528, 495, 429], repair: IT.DIAMOND },
+    { key: 'leather', name: '皮革', base: IT.HELMET_LEATHER, points: [1, 3, 2, 1], toughness: 0, dur: [55, 80, 75, 65], repair: IT.LEATHER },
+    { key: 'gold', name: '金', base: IT.HELMET_GOLD, points: [2, 5, 3, 1], toughness: 0, dur: [77, 112, 105, 91], repair: IT.GOLD_INGOT },
+    { key: 'iron', name: '铁', base: IT.HELMET_IRON, points: [2, 6, 5, 2], toughness: 0, dur: [165, 240, 225, 195], repair: IT.IRON_INGOT },
+    { key: 'diamond', name: '钻石', base: IT.HELMET_DIAMOND, points: [3, 8, 6, 3], toughness: 2, dur: [363, 528, 495, 429], repair: IT.DIAMOND },
   ];
   for (const material of ARMOR_MATERIALS) for (let part = 0; part < ARMOR_PARTS.length; part++) {
     const piece = ARMOR_PARTS[part];
@@ -744,7 +777,7 @@
       durability: material.dur[part],
       enchantable: 'armor',
       armor: {
-        slot: piece.slot, points: material.points[part], material: material.key,
+        slot: piece.slot, points: material.points[part], toughness: material.toughness, material: material.key,
         durability: material.dur[part], repair: material.repair,
       },
     });
@@ -756,6 +789,7 @@
   const RECIPES = [
     { shapeless: [ID.LOG], out: { id: ID.PLANKS, n: 4 } },
     { shapeless: [ID.SPRUCE_LOG], out: { id: ID.PLANKS, n: 4 } },
+    { shapeless: [ID.BIRCH_LOG], out: { id: ID.PLANKS, n: 4 } },
     { pattern: ['P', 'P'], key: { P: ID.PLANKS }, out: { id: IT.STICK, n: 4 } },
     { pattern: ['PP', 'PP'], key: { P: ID.PLANKS }, out: { id: ID.CRAFTING, n: 1 } },
     { pattern: ['CCC', 'C C', 'CCC'], key: { C: ID.COBBLE }, out: { id: ID.FURNACE, n: 1 } },
@@ -764,6 +798,9 @@
     { pattern: ['C', 'S'], key: { C: IT.CHARCOAL, S: IT.STICK }, out: { id: ID.TORCH, n: 4 } },
     { pattern: [' I', 'I '], key: { I: IT.IRON_INGOT }, out: { id: IT.SHEARS, n: 1 }, mirror: true },
     { pattern: ['SS', 'SS'], key: { S: ID.STONE }, out: { id: ID.STONE_BRICKS, n: 4 } },
+    { pattern: ['SS', 'SS'], key: { S: ID.SAND }, out: { id: ID.SANDSTONE, n: 1 } },
+    { pattern: ['TT', 'TT'], key: { T: IT.STRING }, out: { id: ID.WOOL, n: 1 } },
+    { pattern: ['CC', 'CC'], key: { C: IT.CLAY_BALL }, out: { id: ID.CLAY, n: 1 } },
     { pattern: ['BB', 'BB'], key: { B: IT.BRICK }, out: { id: ID.BRICKS, n: 1 } },
     { pattern: ['GSG', 'SGS', 'GSG'], key: { G: IT.GUNPOWDER, S: ID.SAND }, out: { id: ID.TNT, n: 1 } },
     { pattern: ['WWW', 'PPP'], key: { W: ID.WOOL, P: ID.PLANKS }, out: { id: ID.BED, n: 1 } },
@@ -810,6 +847,9 @@
     { pattern: ['XIX', ' P '], key: { X: IT.STICK, I: ID.STONE_SLAB, P: ID.PLANKS }, out: { id: ID.GRINDSTONE, n: 1 } },
     { pattern: ['II', 'PP', 'PP'], key: { I: IT.IRON_INGOT, P: ID.PLANKS }, out: { id: ID.SMITHING_TABLE, n: 1 } },
     { pattern: [' L ', 'LFL', ' L '], key: { L: ID.LOG, F: ID.FURNACE }, out: { id: ID.SMOKER, n: 1 } },
+    { pattern: ['PIP', 'PPP', ' P '], key: { P: ID.PLANKS, I: IT.IRON_INGOT }, out: { id: IT.SHIELD, n: 1 } },
+    { pattern: ['I I', 'III'], key: { I: IT.IRON_INGOT }, out: { id: IT.MINECART, n: 1 } },
+    { pattern: ['I I', 'ISI', 'I I'], key: { I: IT.IRON_INGOT, S: IT.STICK }, out: { id: ID.RAIL, n: 16 } },
   ];
   // tools (M = material)
   const TOOL_MATS = TIER_REPAIR;
@@ -843,6 +883,7 @@
   SMELT[ID.COBBLE] = { id: ID.STONE, n: 1, xp: 0.1 };
   SMELT[ID.LOG] = { id: IT.CHARCOAL, n: 1, xp: 0.15 };
   SMELT[ID.SPRUCE_LOG] = { id: IT.CHARCOAL, n: 1, xp: 0.15 };
+  SMELT[ID.BIRCH_LOG] = { id: IT.CHARCOAL, n: 1, xp: 0.15 };
   SMELT[IT.PORK_RAW] = { id: IT.PORK_COOKED, n: 1, xp: 0.35 };
   SMELT[IT.BEEF_RAW] = { id: IT.BEEF_COOKED, n: 1, xp: 0.35 };
   SMELT[IT.MUTTON_RAW] = { id: IT.MUTTON_COOKED, n: 1, xp: 0.35 };
@@ -855,7 +896,7 @@
   // fuel: burn seconds (one smelt = 10s)
   const FUEL = {};
   FUEL[IT.COAL] = 80; FUEL[IT.CHARCOAL] = 80;
-  FUEL[ID.LOG] = 15; FUEL[ID.SPRUCE_LOG] = 15; FUEL[ID.PLANKS] = 15;
+  FUEL[ID.LOG] = 15; FUEL[ID.SPRUCE_LOG] = 15; FUEL[ID.BIRCH_LOG] = 15; FUEL[ID.PLANKS] = 15;
   FUEL[ID.PLANK_SLAB] = 7.5;
   FUEL[IT.STICK] = 5; FUEL[ID.SAPLING] = 5;
   FUEL[ID.CRAFTING] = 15; FUEL[ID.CHEST] = 15; FUEL[ID.BOOKSHELF] = 15;
@@ -866,7 +907,7 @@
   FUEL[IT.HOE_WOOD] = 10;
 
   const SOUND_GROUPS = {
-    foliage: [ID.SAPLING, ID.LEAVES, ID.TALLGRASS, ID.FLOWER_RED, ID.FLOWER_YELLOW, ID.LEAVES_SPRUCE,
+    foliage: [ID.SAPLING, ID.LEAVES, ID.TALLGRASS, ID.FLOWER_RED, ID.FLOWER_YELLOW, ID.LEAVES_SPRUCE, ID.BIRCH_LEAVES,
       ID.WHEAT_CROP, ID.CARROT_CROP, ID.POTATO_CROP, ID.SUGAR_CANE, ID.FIRE],
     gravel: [ID.GRAVEL, ID.CLAY],
     snow: [ID.SNOW, ID.GRASS_SNOW, ID.SNOW_LAYER],

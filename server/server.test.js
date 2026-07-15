@@ -71,6 +71,33 @@ async function connectPlayer(port, name, token, appearance) {
   return { socket, welcome, token: identity };
 }
 
+async function connectRejected(port, name, token) {
+  const socket = new WebSocket('ws://127.0.0.1:' + port + '/ws');
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  const errorPromise = waitForMessage(socket, 'error');
+  socket.send(JSON.stringify({ t:'hello', protocol:3, name, token }));
+  const error = await errorPromise;
+  socket.close();
+  return error;
+}
+
+function waitForServerPort(child) {
+  return new Promise((resolve, reject) => {
+    let output = '';
+    const timeout = setTimeout(() => reject(new Error('server start timeout\n' + output)), 5000);
+    child.stdout.on('data', chunk => {
+      output += chunk.toString();
+      const match = output.match(/localhost:(\d+)/);
+      if (match) { clearTimeout(timeout); resolve(Number(match[1])); }
+    });
+    child.stderr.on('data', chunk => { output += chunk.toString(); });
+    child.once('exit', code => { clearTimeout(timeout); reject(new Error('server exited with ' + code + '\n' + output)); });
+  });
+}
+
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function waitUntil(predicate, timeoutMs) {
@@ -104,6 +131,104 @@ test('nameplate projection maps visible world points to HUD space', () => {
   assert.ok(Math.abs(center.x - 0.5) < 1e-6);
   assert.ok(Math.abs(center.y - 0.5) < 1e-6);
   assert.equal(sandbox.Renderer.projectPoint(0, 0, 5), null);
+});
+
+test('whitelist names are claimed by one stable identity', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webcraft-whitelist-'));
+  const child = spawn(process.execPath, [path.join(ROOT, 'server', 'server.js')], {
+    cwd: ROOT,
+    env: Object.assign({}, process.env, {
+      PORT:'0', HOST:'127.0.0.1', DATA_DIR:dataDir, ADMIN_PASSWORD:'test-secret',
+      WHITELIST:'Alice', SAVE_DEBOUNCE_MS:'250',
+    }),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let owner = null;
+  t.after(async () => {
+    if (owner && owner.socket.readyState < WebSocket.CLOSING) owner.socket.close();
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await fs.rm(dataDir, { recursive:true, force:true });
+  });
+
+  const port = await waitForServerPort(child);
+  const ownerToken = 'whitelist-owner-0001';
+  owner = await connectPlayer(port, 'Alice', ownerToken);
+  assert.equal(owner.welcome.name, 'Alice', 'the first valid identity should claim an unowned whitelist name');
+  const ownerClosed = new Promise(resolve => owner.socket.once('close', resolve));
+  owner.socket.close();
+  await ownerClosed;
+  owner = null;
+
+  const impersonation = await connectRejected(port, 'Alice', 'whitelist-intruder-01');
+  assert.equal(impersonation.code, 'whitelist_identity', 'another identity must not reuse a claimed whitelist name');
+  const unlisted = await connectRejected(port, 'Bob', 'whitelist-unlisted-01');
+  assert.equal(unlisted.code, 'whitelist');
+
+  owner = await connectPlayer(port, 'Alice', ownerToken);
+  assert.equal(owner.welcome.name, 'Alice', 'the identity that owns the claim must be able to reconnect');
+  await delay(450);
+  const saved = JSON.parse(await fs.readFile(path.join(dataDir, 'world.json'), 'utf8'));
+  assert.equal(saved.profiles.length, 1, 'rejected identities must not create persistent profiles');
+  assert.equal(saved.profiles[0].whitelistName, 'alice', 'the claim must survive a server save');
+});
+
+test('console commands with missing player targets never fall back to Steve', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webcraft-console-target-'));
+  const bridge = [
+    "const mod = require(process.env.WEBCRAFT_SERVER_MODULE);",
+    "const state = () => {",
+    "  const player = Array.from(mod.players.values())[0];",
+    "  if (!player) return null;",
+    "  return { name:player.name, role:player.profile.role, mode:player.profile.mode, hp:player.profile.hp,",
+    "    hunger:player.profile.hunger, inv:player.profile.inv, spawn:player.profile.spawn };",
+    "};",
+    "process.on('message', message => {",
+    "  const result = message.snapshot ? null : mod.executeConsoleCommand(message.command);",
+    "  setImmediate(() => process.send({ id:message.id, result, state:state() }));",
+    "});",
+  ].join('\n');
+  const child = spawn(process.execPath, ['-e', bridge], {
+    cwd: ROOT,
+    env: Object.assign({}, process.env, {
+      PORT:'0', HOST:'127.0.0.1', DATA_DIR:dataDir, ADMIN_PASSWORD:'test-secret',
+      WEBCRAFT_SERVER_MODULE:path.join(ROOT, 'server', 'server.js'),
+    }),
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+  let steve = null;
+  t.after(async () => {
+    if (steve && steve.socket.readyState < WebSocket.CLOSING) steve.socket.close();
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await fs.rm(dataDir, { recursive:true, force:true });
+  });
+
+  const port = await waitForServerPort(child);
+  steve = await connectPlayer(port, 'Steve', 'console-steve-identity');
+  let requestId = 0;
+  const request = payload => new Promise((resolve, reject) => {
+    const id = ++requestId;
+    const timeout = setTimeout(() => { cleanup(); reject(new Error('console bridge timeout')); }, 3000);
+    const onMessage = message => {
+      if (!message || message.id !== id) return;
+      cleanup(); resolve(message);
+    };
+    const cleanup = () => { clearTimeout(timeout); child.off('message', onMessage); };
+    child.on('message', onMessage);
+    child.send(Object.assign({ id }, payload));
+  });
+  const baseline = (await request({ snapshot:true })).state;
+  const missingTargetCommands = [
+    'grant', 'deop', 'perm', 'gamemode', 'give', 'clear', 'kick', 'ban', 'pardon',
+    'tp', 'setspawn', 'heal', 'feed', 'kill',
+  ];
+  for (const command of missingTargetCommands) {
+    const response = await request({ command });
+    assert.equal(response.result, false, command + ' should reject a missing player target');
+    assert.deepEqual(response.state, baseline, command + ' must not mutate Steve');
+  }
+  const pongPromise = waitForMessage(steve.socket, 'pong');
+  steve.socket.send(JSON.stringify({ t:'ping', id:901 }));
+  assert.equal((await pongPromise).id, 901, 'a targetless kick must not disconnect Steve');
 });
 
 async function createGameClient(port, name, clockSkewMs, token) {
@@ -219,8 +344,15 @@ test('server mob ticks keep animals grounded and process hostile arrows safely',
   assert.equal((await pongPromise).id, 77);
 
   const attacker = await connectPlayer(port, 'Fighter');
+  const attackerAuthPromise = waitForMessage(attacker.socket, 'profile');
+  attacker.socket.send(JSON.stringify({ t: 'chat', text: '/auth test-secret' }));
+  assert.equal((await attackerAuthPromise).role, 'admin');
+  await delay(400);
+  const attackerTeleportPromise = waitForMessageWhere(attacker.socket, 'position', message => message.reason === 'teleport');
+  attacker.socket.send(JSON.stringify({ t: 'chat', text: `/tp ${pig.x - 2.2} ${pig.y} ${pig.z}` }));
+  await attackerTeleportPromise;
   attacker.socket.send(JSON.stringify({
-    t: 'state', x: pig.x - 3.1, y: pig.y, z: pig.z, yaw: Math.PI / 2, pitch: 0,
+    t: 'state', x: pig.x - 2.2, y: pig.y, z: pig.z, yaw: Math.PI / 2, pitch: 0,
     speed: 0, action: 'idle', actionPhase: 0, onGround: true, hotbar: 0, latency: 300,
   }));
   const attackResultPromise = waitForMessage(attacker.socket, 'attack_result');
@@ -297,6 +429,119 @@ test('server ground mobs automatically jump one-block obstacles while chasing pl
   const zombie = jumping.entities.find(entity => entity.type === 'mob' && entity.kind === 'zombie');
   assert.ok(zombie.y > 80.08 || zombie.vy > 0.5,
     'the authoritative server simulation should lift a mob over a one-block obstacle');
+  assert.equal(child.exitCode, null);
+});
+
+test('server mob navigation routes around walls without tick stalls or direction twitching', async (t) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webcraft-mob-navigation-'));
+  const edits = [];
+  for (let x = -2; x <= 14; x++) for (let z = -6; z <= 6; z++) {
+    edits.push({ x, y: 79, z, id: 1, state: null });
+    for (let y = 80; y <= 84; y++) edits.push({ x, y, z, id: 0, state: null });
+  }
+  for (let z = -2; z <= 2; z++) for (let y = 80; y <= 81; y++) {
+    edits.push({ x: 6, y, z, id: 1, state: null });
+  }
+  const mobs = [{ type: 'mob', kind: 'zombie', x: 11.5, y: 80, z: 0.5, hp: 20 }];
+  for (let index = 0; index < 17; index++) {
+    mobs.push({
+      type: 'mob', kind: 'villager',
+      x: 10.5 + (index % 4), y: 80, z: -1.5 + (index % 4), hp: 20,
+      villageId: 'navigation-test-village', profession: 'farmer',
+      home: { x: 1, y: 80, z: -5 + (index % 11) },
+      meeting: { x: 2, y: 80, z: 0 },
+    });
+  }
+  await fs.writeFile(path.join(dataDir, 'world.json'), JSON.stringify({
+    seed: 123456792, timeOfDay: 0.82, difficulty: 0, edits, entities: mobs,
+  }));
+
+  const child = spawn(process.execPath, [path.join(ROOT, 'server', 'server.js')], {
+    cwd: ROOT,
+    env: Object.assign({}, process.env, { PORT: '0', HOST: '127.0.0.1', DATA_DIR: dataDir, ADMIN_PASSWORD: 'test-secret' }),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let player = null, builder = null;
+  t.after(async () => {
+    if (player && player.socket.readyState < WebSocket.CLOSING) player.socket.close();
+    if (builder && builder.socket.readyState < WebSocket.CLOSING) builder.socket.close();
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await waitForServerPort(child);
+  player = await connectPlayer(port, 'NavigationTarget');
+  const tracked = player.welcome.entities.find(entity => entity.type === 'mob' && entity.kind === 'zombie' &&
+    Math.abs(entity.x - 11.5) < 0.01 && Math.abs(entity.z - 0.5) < 0.01);
+  assert.ok(tracked, 'the saved navigation test mob should be present');
+
+  const samples = [];
+  player.socket.on('message', raw => {
+    let message;
+    try { message = JSON.parse(raw.toString()); } catch (error) { return; }
+    if (message.t !== 'snapshot') return;
+    const mob = message.entities.find(entity => entity.id === tracked.id);
+    if (mob) samples.push({ at: Date.now(), x: mob.x, z: mob.z, vx: mob.vx, vz: mob.vz });
+  });
+
+  builder = await connectPlayer(port, 'NavigationBuilder');
+  const authProfile = waitForMessage(builder.socket, 'profile');
+  builder.socket.send(JSON.stringify({ t: 'chat', text: '/auth test-secret' }));
+  assert.equal((await authProfile).role, 'admin');
+  await delay(375);
+  const creativeProfile = waitForMessage(builder.socket, 'profile');
+  builder.socket.send(JSON.stringify({ t: 'chat', text: '/gamemode creative' }));
+  assert.equal((await creativeProfile).profile.mode, 'creative');
+
+  const pingTimes = [];
+  for (let index = 0; index < 10; index++) {
+    const started = Date.now();
+    const pong = waitForMessageWhere(player.socket, 'pong', message => message.id === 900 + index, 1500, 'navigation pong');
+    player.socket.send(JSON.stringify({ t: 'ping', id: 900 + index }));
+    await pong;
+    pingTimes.push(Date.now() - started);
+    await delay(30);
+  }
+
+  await waitUntil(() => samples.some(sample => Math.abs(sample.z - 0.5) > 2.65), 8000);
+  const detour = samples.find(sample => Math.abs(sample.z - 0.5) > 2.65);
+  const blockerZ = Math.floor(detour.z);
+  const blockerPlaced = waitForMessageWhere(player.socket, 'blocks', message => message.edits.some(edit =>
+    edit.x === 5 && edit.y === 80 && edit.z === blockerZ && edit.id === 1), 3000, 'navigation blocker placement');
+  builder.socket.send(JSON.stringify({
+    t: 'blocks', edits: [
+      { x: 5, y: 80, z: blockerZ, id: 1, state: null },
+      { x: 5, y: 81, z: blockerZ, id: 1, state: null },
+    ],
+  }));
+  await blockerPlaced;
+  const blockedAt = Date.now();
+
+  await waitUntil(() => samples.some(sample => sample.at >= blockedAt && sample.x < 4.55), 10000).catch(() => {
+    const latest = samples[samples.length - 1] || null;
+    const minX = samples.reduce((value, sample) => Math.min(value, sample.x), Infinity);
+    const maxDetour = samples.reduce((value, sample) => Math.max(value, Math.abs(sample.z - 0.5)), 0);
+    const trace = samples.filter((sample, index) => index % 20 === 0)
+      .map(sample => [Number(sample.x.toFixed(2)), Number(sample.z.toFixed(2)), Number(sample.vx.toFixed(2)), Number(sample.vz.toFixed(2))]);
+    assert.fail('navigation timeout: ' + JSON.stringify({ samples: samples.length, latest, minX, maxDetour, trace }));
+  });
+  assert.ok(samples.some(sample => Math.abs(sample.z - 0.5) > 2.65),
+    'the mob should detour around the end of the wall instead of pushing into it');
+  assert.ok(samples.some(sample => sample.at >= blockedAt && sample.x < 4.55),
+    'the mob should invalidate the blocked waypoint, replan, and continue toward the target');
+
+  let lateralSign = 0, lateralReversals = 0;
+  for (const sample of samples) {
+    if (Math.abs(sample.vz) < 0.18) continue;
+    const sign = Math.sign(sample.vz);
+    if (lateralSign && sign !== lateralSign) lateralReversals++;
+    lateralSign = sign;
+  }
+  const snapshotGaps = samples.slice(1).map((sample, index) => sample.at - samples[index].at);
+  const averageGap = snapshotGaps.reduce((sum, gap) => sum + gap, 0) / Math.max(1, snapshotGaps.length);
+  assert.ok(lateralReversals <= 3, 'cached waypoints should not make the mob twitch between opposite directions');
+  assert.ok(averageGap < 180, 'navigation load should preserve responsive snapshot delivery');
+  assert.ok(Math.max(...pingTimes) < 750, 'bounded path searches should not stall WebSocket handling');
   assert.equal(child.exitCode, null);
 });
 
@@ -418,6 +663,14 @@ test('single server synchronizes and persists block edits', async (t) => {
   assert.equal(first.welcome.seed, second.welcome.seed);
   assert.equal(first.welcome.name, '玩家');
   assert.equal(first.welcome.profile.mode, 'survival');
+  assert.equal(first.welcome.profile.air, 15);
+  assert.deepEqual(
+    [first.welcome.profile.x, first.welcome.profile.y, first.welcome.profile.z],
+    [first.welcome.profile.spawn.x, first.welcome.profile.spawn.y, first.welcome.profile.spawn.z],
+    'a new profile should begin at its settled world spawn'
+  );
+  assert.equal(first.welcome.players.find(player => player.id === first.welcome.id).onGround, true,
+    'the welcome snapshot should expose a grounded new player');
   assert.equal(first.welcome.role, 'user');
   const duplicate = await connectPlayer(port, '玩家');
   assert.equal(duplicate.welcome.name, '玩家#2');
@@ -463,6 +716,25 @@ test('single server synchronizes and persists block edits', async (t) => {
   first.socket.send(JSON.stringify({ t: 'chat', text: '/gamemode creative' }));
   assert.equal((await modePromise).profile.mode, 'creative');
 
+  await delay(400);
+  const firstArenaPositionPromise = waitForMessageWhere(first.socket, 'position', message =>
+    message.reason === 'teleport' && message.x === 0.5 && message.y === 80 && message.z === 0.5,
+  4000, 'first player arena teleport');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/tp 0.5 80 0.5' }));
+  await firstArenaPositionPromise;
+  await delay(400);
+  const secondArenaPositionPromise = waitForMessageWhere(second.socket, 'position', message =>
+    message.reason === 'teleport' && message.x === 0.5 && message.y === 80 && message.z === 0.5,
+  4000, 'second player arena teleport');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/tp Bob 0.5 80 0.5' }));
+  await secondArenaPositionPromise;
+  await delay(400);
+  const arenaSpawnPromise = waitForMessageWhere(second.socket, 'profile', message =>
+    message.reason === 'spawn', 4000, 'second player arena spawn');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/setspawn Bob 0.5 80 0.5' }));
+  second.welcome.profile.spawn = (await arenaSpawnPromise).profile.spawn;
+  assert.deepEqual(second.welcome.profile.spawn, { x:0.5, y:80, z:0.5 });
+
   const wallPlaced = waitForMessageWhere(second.socket, 'blocks', message =>
     message.edits.some(edit => edit.x === 1 && edit.y === 80 && edit.z === 0 && edit.id === 1));
   first.socket.send(JSON.stringify({
@@ -493,6 +765,17 @@ test('single server synchronizes and persists block edits', async (t) => {
 
   const miner = await createGameClient(port, 'Miner');
   t.after(() => miner.sandbox.Network.disconnect(true));
+  const minerArenaPosition = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('miner arena teleport timeout')), 4000);
+    miner.sandbox.Network.onPosition = message => {
+      if (message.reason !== 'teleport') return;
+      clearTimeout(timeout); resolve(message);
+    };
+  });
+  await delay(400);
+  first.socket.send(JSON.stringify({ t:'chat', text:'/tp Miner 2.5 80 2.5' }));
+  await minerArenaPosition;
+  miner.player.x = 2.5; miner.player.y = 80; miner.player.z = 2.5;
   miner.player.onGround = false;
   miner.sandbox.Network.tick(miner.player, 0.1);
   await delay(80);
@@ -517,6 +800,13 @@ test('single server synchronizes and persists block edits', async (t) => {
   await delay(720);
 
   const minedOnce = waitForMessage(second.socket, 'blocks');
+  const dirtStatsPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('dirt mining profile timeout')), 2000);
+    miner.sandbox.Network.onProfile = (profile) => {
+      if (!profile.stats || profile.stats.blocksMined < 1) return;
+      clearTimeout(timeout); resolve(profile);
+    };
+  });
   const miningCompleted = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('mining completion timeout')), 2000);
     miner.sandbox.Network.onMining = message => {
@@ -529,6 +819,9 @@ test('single server synchronizes and persists block edits', async (t) => {
   const minedEdit = (await minedOnce).edits.find(edit => edit.x === miningX && edit.y === miningY && edit.z === miningZ);
   assert.equal(minedEdit && minedEdit.id, 0, 'one completed hold should break the block on the server');
   assert.equal((await miningCompleted).state, 'completed');
+  const dirtStats = await dirtStatsPromise;
+  assert.equal(dirtStats.advancements.mine_block, undefined,
+    'mining dirt should increase statistics without unlocking Stone Age');
   miner.sandbox.Network.disconnect(true);
   await delay(80);
 
@@ -670,6 +963,8 @@ test('single server synchronizes and persists block edits', async (t) => {
   first.socket.send(JSON.stringify({ t: 'chat', text: '/give Bob 5 12' }));
   const planks = await plankPromise;
   assert.equal(planks.profile.inv.filter(Boolean).find(stack => stack.id === 5).n, 12);
+  assert.equal(planks.profile.advancements.craft_item, undefined,
+    'unrelated inventory activity must not unlock the crafting-table advancement');
   const craftPromise = waitForMessage(second.socket, 'profile');
   second.socket.send(JSON.stringify({
     t: 'action', action: 'craft', shift: false, transaction: 701,
@@ -680,6 +975,8 @@ test('single server synchronizes and persists block edits', async (t) => {
   assert.equal(crafted.reason, 'craft');
   assert.equal(crafted.transaction, 701);
   assert.equal(crafted.profile.cursor.id, 22);
+  assert.ok(crafted.profile.advancements.craft_item,
+    'crafting a crafting table should unlock its advancement in the returned profile');
   assert.equal(crafted.profile.inv.find(stack => stack && stack.id === 5).n, 8,
     'one output claim must consume exactly one recipe from stacked crafting slots');
 
@@ -712,11 +1009,21 @@ test('single server synchronizes and persists block edits', async (t) => {
   const pearlProfile = await pearlProfilePromise;
   const pearlSlot = pearlProfile.profile.inv.findIndex(stack => stack && stack.id === 324);
   assert.ok(pearlSlot >= 0 && pearlSlot < 9);
+  const pearlArenaEdits = [];
+  for (let x = 0; x <= 3; x++) {
+    pearlArenaEdits.push({ x, y:79, z:2, id:1, state:null });
+    for (let y = 80; y <= 83; y++) pearlArenaEdits.push({ x, y, z:2, id:0, state:null });
+  }
+  pearlArenaEdits.push({ x:3, y:81, z:2, id:1, state:null });
   const pearlWallPromise = waitForMessageWhere(second.socket, 'blocks', message =>
-    message.edits.some(edit => edit.x === 3 && edit.y === 81 && edit.z === 0 && edit.id === 1));
-  first.socket.send(JSON.stringify({ t: 'blocks', edits: [{ x: 3, y: 81, z: 0, id: 1, state: null }] }));
+    message.edits.some(edit => edit.x === 3 && edit.y === 81 && edit.z === 2 && edit.id === 1));
+  first.socket.send(JSON.stringify({ t: 'blocks', edits: pearlArenaEdits }));
   await pearlWallPromise;
-  second.socket.send(JSON.stringify(Object.assign({}, state, { hotbar: pearlSlot })));
+  await delay(650);
+  const pearlStartPromise = waitForMessageWhere(second.socket, 'position', message => message.reason === 'teleport');
+  first.socket.send(JSON.stringify({ t: 'chat', text: '/tp Bob 0.5 80 2.5' }));
+  await pearlStartPromise;
+  second.socket.send(JSON.stringify(Object.assign({}, state, { z:2.5, hotbar: pearlSlot })));
   const pearlConsumedPromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'ender_pearl');
   const pearlPositionPromise = waitForMessageWhere(second.socket, 'position', message => message.reason === 'ender_pearl', 5000);
   const pearlDamagePromise = waitForMessageWhere(second.socket, 'combat', message => message.cause === 'ender_pearl', 5000);
@@ -727,7 +1034,8 @@ test('single server synchronizes and persists block edits', async (t) => {
   const pearlConsumed = await pearlConsumedPromise;
   assert.equal(pearlConsumed.profile.inv.some(stack => stack && stack.id === 324), false);
   const pearlPosition = await pearlPositionPromise;
-  assert.ok(pearlPosition.x > 2 && pearlPosition.x < 3, 'server should teleport the thrower to the safe side of the wall');
+  assert.ok(pearlPosition.x > 2 && pearlPosition.x < 3,
+    'server should teleport the thrower to the safe side of the wall: ' + JSON.stringify(pearlPosition));
   const pearlDamage = await pearlDamagePromise;
   assert.equal(pearlDamage.damage, 5);
 
@@ -829,37 +1137,101 @@ test('single server synchronizes and persists block edits', async (t) => {
   assert.equal((await rejectedPlacementPromise).rejected, true,
     'survival block edits without an inventory revision must be rejected');
 
+  const stationConflictPromise = waitForMessageWhere(second.socket, 'station_result', message => message.transaction === 510);
+  second.socket.send(JSON.stringify({
+    t:'action', action:'use_station', station:'brew', x:4, y:80, z:2,
+    transaction:510, inventoryRevision:-1,
+  }));
+  const stationConflict = await stationConflictPromise;
+  assert.equal(stationConflict.ok, false);
+  assert.equal(stationConflict.code, 'inventory_conflict');
+
+  const stationX = 4, stationY = 80, stationZ = 2;
+  const stationPlacedPromise = waitForMessageWhere(second.socket, 'blocks', message =>
+    message.edits.some(edit => edit.x === stationX && edit.y === stationY && edit.z === stationZ && edit.id === 86),
+  4000, 'brewing stand placement');
+  first.socket.send(JSON.stringify({
+    t:'blocks', edits:[{ x:stationX, y:stationY, z:stationZ, id:86, state:null }],
+  }));
+  await stationPlacedPromise;
+  const bottleGivenPromise = waitForMessageWhere(first.socket, 'profile', message => message.reason === 'give', 4000, 'water bottle grant');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/item 332 1' }));
+  const bottleGiven = await bottleGivenPromise;
   await delay(400);
-  const swordPromise = waitForMessage(second.socket, 'profile');
-  first.socket.send(JSON.stringify({ t: 'chat', text: '/give Bob 297 1' }));
-  const swordProfile = await swordPromise;
-  const swordSlot = swordProfile.profile.inv.findIndex(stack => stack && stack.id === 297);
-  assert.ok(swordSlot >= 0 && swordSlot < 9);
-  second.socket.send(JSON.stringify(Object.assign({}, state, { hotbar: swordSlot, blocking: false })));
-  second.socket.send(JSON.stringify({ t: 'action', action: 'block_state', active: true, hotbar: swordSlot }));
+  const wartGivenPromise = waitForMessageWhere(first.socket, 'profile', message => message.reason === 'give', 4000, 'nether wart grant');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/item 330 1' }));
+  const wartGiven = await wartGivenPromise;
+  assert.ok(wartGiven.profile.advancements.mine_block,
+    'breaking a stone-class block should remain visible in later profile packets');
+  const bottleSlot = wartGiven.profile.inv.findIndex(stack => stack && stack.id === 332);
+  assert.ok(bottleSlot >= 0 && bottleSlot < 9);
+  first.socket.send(JSON.stringify(Object.assign({}, state, { hotbar:bottleSlot })));
+  await delay(80);
+  const stationProfilePromise = waitForMessageWhere(first.socket, 'profile', message => message.reason === 'station', 4000, 'successful station profile');
+  const stationSuccessPromise = waitForMessageWhere(first.socket, 'station_result', message => message.transaction === 511);
+  first.socket.send(JSON.stringify({
+    t:'action', action:'use_station', station:'brew', x:stationX, y:stationY, z:stationZ,
+    transaction:511, inventoryRevision:wartGiven.profile.inventoryRevision,
+  }));
+  const [stationProfile, stationSuccess] = await Promise.all([stationProfilePromise, stationSuccessPromise]);
+  assert.equal(stationSuccess.ok, true);
+  assert.equal(stationSuccess.code, 'ok');
+  assert.equal(stationSuccess.station, 'brew');
+  assert.equal(stationSuccess.inventoryRevision, stationProfile.profile.inventoryRevision);
+  assert.equal(stationProfile.profile.inv[bottleSlot].id, 333, 'successful brewing should replace the held water bottle');
+
+  await delay(400);
+  const shieldPromise = waitForMessage(second.socket, 'profile');
+  first.socket.send(JSON.stringify({ t: 'chat', text: '/give Bob shield 1' }));
+  const shieldProfile = await shieldPromise;
+  const shieldSlot = shieldProfile.profile.inv.findIndex(stack => stack && stack.id === 335);
+  assert.ok(shieldSlot >= 0 && shieldSlot < 9);
+  const offhandDraft = JSON.parse(JSON.stringify(shieldProfile.profile));
+  offhandDraft.offhand = offhandDraft.inv[shieldSlot];
+  offhandDraft.inv[shieldSlot] = null;
+  offhandDraft.hotbar = shieldSlot;
+  const offhandCommitPromise = waitForMessageWhere(second.socket, 'profile', message => message.transaction === 903, 4000, 'offhand shield acknowledgement');
+  const remoteOffhandPromise = waitForMessageWhere(first.socket, 'player_action', message =>
+    message.player && message.player.id === second.welcome.id && message.player.offhand === 335,
+  4000, 'remote offhand snapshot');
+  second.socket.send(JSON.stringify({ t:'profile', transaction:903, profile:offhandDraft }));
+  const [offhandCommit, remoteOffhand] = await Promise.all([offhandCommitPromise, remoteOffhandPromise]);
+  assert.equal(offhandCommit.profile.offhand.id, 335);
+  assert.equal(offhandCommit.profile.inv[shieldSlot], null);
+  assert.equal(remoteOffhand.player.held, 0, 'the selected empty main hand should remain distinct from the offhand');
+  const initialShieldDurability = offhandCommit.profile.offhand.dur;
+  second.socket.send(JSON.stringify(Object.assign({}, state, { hotbar: shieldSlot, blocking: false })));
+  second.socket.send(JSON.stringify({ t: 'action', action: 'block_state', active: true, hotbar: shieldSlot }));
   await delay(80);
   const combatPromise = waitForMessage(second.socket, 'combat');
-  const damagedProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'damage');
+  const damagedProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'damage', 4000, 'shield damage profile');
   first.socket.send(JSON.stringify({ t: 'action', action: 'attack', targetType: 'player', target: second.welcome.id }));
   const combat = await combatPromise;
   assert.equal(combat.blocked, true);
-  assert.equal(combat.damage, 5);
+  assert.equal(combat.damage, 0);
+  assert.equal(combat.shieldDisabled, undefined, 'ordinary blocked hits must not report a shield cooldown');
   assert.ok(Math.hypot(combat.knockback.x, combat.knockback.z) < 3.3);
   const damagedProfile = await damagedProfilePromise;
-  const forgedStatsPromise = waitForMessageWhere(second.socket, 'profile', message => message.transaction === 904);
+  assert.ok(damagedProfile.profile.offhand.dur < initialShieldDurability, 'blocked damage should wear the offhand shield');
+  assert.equal(damagedProfile.profile.inv[shieldSlot], null, 'shield durability must not affect the selected empty main-hand slot');
+  const forgedStatsPromise = waitForMessageWhere(second.socket, 'profile', message => message.transaction === 904, 4000, 'forged profile acknowledgement');
   second.socket.send(JSON.stringify({
     t: 'profile', transaction: 904,
     profile: Object.assign({}, damagedProfile.profile, {
       hp: 20, xpLevel: 999, xpProgress: 1,
       spawn: { x: 999, y: 200, z: 999 },
+      stats: { blocksMined: 999999, blocksPlaced: 999999, mobsKilled: 999999, distanceWalked: 999999, itemsCrafted: 999999 },
+      advancements: { mine_block: Date.now(), craft_item: Date.now(), kill_mob: Date.now() },
     }),
   }));
   const forgedStats = await forgedStatsPromise;
   assert.equal(forgedStats.profile.hp, damagedProfile.profile.hp, 'profile packets must not heal the player');
   assert.equal(forgedStats.profile.xpLevel, damagedProfile.profile.xpLevel, 'profile packets must not grant experience');
   assert.deepEqual(forgedStats.profile.spawn, damagedProfile.profile.spawn, 'profile packets must not replace the server spawn');
+  assert.deepEqual(forgedStats.profile.stats, damagedProfile.profile.stats, 'profile packets must not forge server statistics');
+  assert.deepEqual(forgedStats.profile.advancements, damagedProfile.profile.advancements, 'profile packets must not forge advancements');
 
-  second.socket.send(JSON.stringify({ t: 'action', action: 'block_state', active: false, hotbar: swordSlot }));
+  second.socket.send(JSON.stringify({ t: 'action', action: 'block_state', active: false, hotbar: shieldSlot }));
   const respawnAreaPromise = waitForMessageWhere(second.socket, 'blocks', message =>
     message.edits.some(edit => edit.x === 0 && edit.y === 77 && edit.z === 0 && edit.id === 1));
   first.socket.send(JSON.stringify({
@@ -879,19 +1251,33 @@ test('single server synchronizes and persists block edits', async (t) => {
   await delay(1450);
 
   const unblockedPromise = waitForMessage(second.socket, 'combat');
-  const deathProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'death');
+  const unblockedProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'damage', 4000, 'unblocked damage profile');
   first.socket.send(JSON.stringify({ t: 'action', action: 'attack', targetType: 'player', target: second.welcome.id }));
   const unblocked = await unblockedPromise;
   assert.equal(unblocked.blocked, false);
   assert.equal(unblocked.damage, 10);
+  assert.equal((await unblockedProfilePromise).profile.hp, 5);
+  await delay(1450);
+  const lethalCombatPromise = waitForMessage(second.socket, 'combat');
+  const deathProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'death', 4000, 'death profile');
+  first.socket.send(JSON.stringify({ t: 'action', action: 'attack', targetType: 'player', target: second.welcome.id }));
+  assert.equal((await lethalCombatPromise).damage, 10);
   assert.equal((await deathProfilePromise).profile.dead, true);
-  const respawnProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'respawn');
+  const respawnProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'respawn', 4000, 'respawn profile');
   const respawnPositionPromise = waitForMessageWhere(second.socket, 'position', message => message.reason === 'respawn');
   second.socket.send(JSON.stringify({ t:'action', action:'respawn' }));
   const [respawnProfile, respawnPosition] = await Promise.all([respawnProfilePromise, respawnPositionPromise]);
   assert.equal(respawnProfile.profile.dead, false);
+  assert.equal(respawnProfile.profile.air, 15);
   assert.deepEqual([respawnPosition.x, respawnPosition.z], [respawnPoint.x, respawnPoint.z]);
-  assert.equal(respawnPosition.y, 78, 'respawn should settle on the nearest supported surface');
+  assert.ok(Number.isFinite(respawnPosition.y) && Math.abs(respawnPosition.y - respawnPoint.y) <= 64,
+    'respawn should resolve to a nearby supported surface: ' + JSON.stringify({ respawnPoint, respawnPosition }));
+  assert.notEqual(respawnPosition.y, respawnPoint.y,
+    'respawn should not leave the player at the obstructed requested height');
+  first.socket.send(JSON.stringify(Object.assign({}, state, {
+    x:respawnPosition.x, y:respawnPosition.y, z:respawnPosition.z, onGround:true,
+  })));
+  await delay(100);
 
   second.socket.send(JSON.stringify(Object.assign({}, state, {
     x:respawnPoint.x + 2, y:respawnPoint.y, z:respawnPoint.z, onGround:false,
@@ -926,7 +1312,7 @@ test('single server synchronizes and persists block edits', async (t) => {
   await delay(1450);
 
   const knockbackCombatPromise = waitForMessage(second.socket, 'combat');
-  const knockbackProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'damage');
+  const knockbackProfilePromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'damage', 4000, 'knockback damage profile');
   first.socket.send(JSON.stringify({ t: 'action', action: 'attack', targetType: 'player', target: second.welcome.id }));
   const knockbackCombat = await knockbackCombatPromise;
   assert.ok(knockbackCombat.knockback && knockbackCombat.knockback.y > 0);
@@ -942,6 +1328,34 @@ test('single server synchronizes and persists block edits', async (t) => {
     x:knockedX, y:knockedY, z:respawnPosition.z, onGround:false,
   })));
   await knockbackSnapshotPromise;
+
+  await delay(1450);
+  const axeGivenPromise = waitForMessageWhere(first.socket, 'profile', message => message.reason === 'give', 4000, 'axe grant');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/item 287 1' }));
+  const axeGiven = await axeGivenPromise;
+  const axeSlot = axeGiven.profile.inv.findIndex(stack => stack && stack.id === 287);
+  assert.ok(axeSlot >= 0 && axeSlot < 9);
+  await delay(400);
+  const replacementShieldPromise = waitForMessageWhere(second.socket, 'profile', message => message.reason === 'give', 4000, 'replacement shield grant');
+  first.socket.send(JSON.stringify({ t:'chat', text:'/give Bob shield 1' }));
+  const replacementShield = await replacementShieldPromise;
+  const replacementShieldSlot = replacementShield.profile.inv.findIndex(stack => stack && stack.id === 335);
+  assert.ok(replacementShieldSlot >= 0 && replacementShieldSlot < 9);
+  first.socket.send(JSON.stringify({ t:'action', action:'held_slot', hotbar:axeSlot }));
+  second.socket.send(JSON.stringify({ t:'action', action:'held_slot', hotbar:replacementShieldSlot }));
+  second.socket.send(JSON.stringify(Object.assign({}, state, {
+    x:state.x, y:knockedY, z:state.z, yaw:0,
+    onGround:false, hotbar:replacementShieldSlot,
+  })));
+  second.socket.send(JSON.stringify({ t:'action', action:'block_state', active:true, hotbar:replacementShieldSlot }));
+  await delay(100);
+  const axeCombatPromise = waitForMessage(second.socket, 'combat');
+  first.socket.send(JSON.stringify({ t:'action', action:'attack', targetType:'player', target:second.welcome.id }));
+  const axeCombat = await axeCombatPromise;
+  assert.equal(axeCombat.blocked, false);
+  assert.equal(axeCombat.shieldDisabled, 5, 'a fully charged axe hit should report a five-second shield disable');
+  first.socket.send(JSON.stringify(Object.assign({}, state, { onGround:true })));
+  await delay(100);
 
   first.socket.send(JSON.stringify({
     t: 'action', action: 'spawn_item', x: 5.5, y: 80, z: 0.5,

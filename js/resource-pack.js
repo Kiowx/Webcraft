@@ -12,8 +12,8 @@
     entries[runtimeName] = tint ? { path, tint } : path;
   };
   const entityPath = file => ROOT + 'entity/' + file;
-  const entityCrop = (runtimeName, file, source) => {
-    entries[runtimeName] = { path:entityPath(file), source };
+  const entityCrop = (runtimeName, file, source, tint) => {
+    entries[runtimeName] = tint ? { path:entityPath(file), source, tint } : { path:entityPath(file), source };
   };
   const entityRegion = (runtimeName, file, source, dest) => {
     entries[runtimeName] = { path:entityPath(file), source, dest };
@@ -25,6 +25,29 @@
     entityCrop(prefix + '_front', file, [u + depth, v + depth, width, height]);
     entityCrop(prefix + '_left', file, [u + depth + width, v + depth, depth, height]);
     entityCrop(prefix + '_back', file, [u + depth * 2 + width, v + depth, width, height]);
+  };
+  const PACKED_FACE_CELLS = Object.freeze({
+    right:[0,0,5,8], left:[5,0,5,8], top:[10,0,6,8],
+    bottom:[0,8,5,8], back:[5,8,5,8], front:[10,8,6,8],
+  });
+  const packedEntityCrop = (runtimeName, file, source, page, cell) => {
+    const spec = { path:entityPath(file), source, packed:{ page, cell:cell.slice() } };
+    Object.defineProperty(spec, 'dest', {
+      enumerable:true,
+      get() {
+        const rect = Textures.rect(page);
+        return [rect[0] + cell[0], rect[1] + cell[1], cell[2], cell[3]];
+      },
+    });
+    entries[runtimeName] = spec;
+  };
+  const packedEntityCube = (prefix, page, file, u, v, width, height, depth) => {
+    packedEntityCrop(prefix + '_top', file, [u + depth, v, width, depth], page, PACKED_FACE_CELLS.top);
+    packedEntityCrop(prefix + '_bottom', file, [u + depth + width, v, width, depth], page, PACKED_FACE_CELLS.bottom);
+    packedEntityCrop(prefix + '_right', file, [u, v + depth, depth, height], page, PACKED_FACE_CELLS.right);
+    packedEntityCrop(prefix + '_front', file, [u + depth, v + depth, width, height], page, PACKED_FACE_CELLS.front);
+    packedEntityCrop(prefix + '_left', file, [u + depth + width, v + depth, depth, height], page, PACKED_FACE_CELLS.left);
+    packedEntityCrop(prefix + '_back', file, [u + depth * 2 + width, v + depth, width, height], page, PACKED_FACE_CELLS.back);
   };
 
   add('blocks', [
@@ -45,6 +68,7 @@
     'bone', 'egg', 'wheat', 'bread', 'carrot', 'potato', 'chicken_raw',
     'chicken_cooked', 'paper', 'clay_ball', 'brick', 'glowstone_dust', 'arrow',
   ]);
+  entityCrop('xp_orb', 'experience_orb.png', [16, 0, 16, 16], [155, 255, 48]);
 
   alias('grass_top', 'blocks', 'grass_top', [145, 201, 96]);
   alias('leaves', 'blocks', 'leaves_oak', [95, 164, 69]);
@@ -57,6 +81,10 @@
   alias('log_side', 'blocks', 'log_oak');
   alias('log_top', 'blocks', 'log_oak_top');
   alias('spruce_log_side', 'blocks', 'log_spruce');
+  alias('birch_log_side', 'blocks', 'log_birch');
+  alias('birch_log_top', 'blocks', 'log_birch_top');
+  alias('birch_leaves', 'blocks', 'leaves_birch', [95, 164, 69]);
+  alias('rail', 'blocks', 'rail_normal');
   alias('flower_red', 'blocks', 'flower_rose');
   alias('flower_yellow', 'blocks', 'flower_dandelion');
   alias('torch', 'blocks', 'torch_on');
@@ -121,6 +149,10 @@
   alias('flint_steel', 'items', 'flint_and_steel');
   alias('bow', 'items', 'bow_standby');
   alias('fishing_rod', 'items', 'fishing_rod_uncast');
+  // Shields are builtin entity models in 1.12.2, so there is no items/shield.png.
+  // Crop the front plate from ModelShield's (0, 0) 12x22x1 cuboid UV layout.
+  entityCrop('shield', 'shield_base_nopattern.png', [1, 1, 12, 22]);
+  alias('minecart', 'items', 'minecart_normal');
   alias('redstone', 'items', 'redstone_dust');
   alias('lapis_lazuli', 'items', 'dye_powder_blue');
 
@@ -201,6 +233,24 @@
   entityCube('cat_muzzle', 'cat/ocelot.png', 0, 0, 3, 2, 2);
   entityCube('cat_ear', 'cat/ocelot.png', 0, 0, 1, 1, 2);
   entityCrop('cat_face', 'cat/ocelot.png', [5, 5, 5, 4]);
+  entityCrop('rabbit', 'rabbit/brown.png', [8, 8, 8, 8]);
+  entityCrop('rabbit_face', 'rabbit/brown.png', [32, 5, 6, 5]);
+  entityCrop('rabbit_tail', 'rabbit/brown.png', [52, 6, 4, 4]);
+  entityCrop('horse', 'horse/horse_brown.png', [20, 20, 12, 12]);
+  entityCrop('horse_face', 'horse/horse_brown.png', [0, 21, 7, 7]);
+  entityCrop('horse_tail', 'horse/horse_brown.png', [44, 0, 4, 12]);
+  entityCrop('horse_mane', 'horse/horse_brown.png', [44, 16, 4, 12]);
+  entityCube('horse_original_body', 'horse/horse_brown.png', 0, 34, 10, 10, 24);
+  entityCube('horse_original_leg', 'horse/horse_brown.png', 78, 29, 4, 9, 5);
+  entityCube('horse_original_shin', 'horse/horse_brown.png', 78, 43, 3, 5, 3);
+  entityCube('horse_original_hoof', 'horse/horse_brown.png', 78, 51, 4, 3, 4);
+  entityCube('horse_original_head', 'horse/horse_brown.png', 0, 0, 5, 5, 7);
+  entityCube('horse_original_upper_mouth', 'horse/horse_brown.png', 24, 18, 4, 3, 6);
+  entityCube('horse_original_lower_mouth', 'horse/horse_brown.png', 24, 27, 4, 2, 5);
+  entityCube('horse_original_ear', 'horse/horse_brown.png', 0, 0, 2, 3, 1);
+  entityCube('horse_original_neck', 'horse/horse_brown.png', 0, 12, 4, 14, 8);
+  entityCube('horse_original_mane', 'horse/horse_brown.png', 58, 0, 2, 16, 4);
+  entityCube('horse_original_tail', 'horse/horse_brown.png', 38, 7, 3, 4, 7);
 
   entityCrop('squid', 'squid.png', [12, 12, 12, 16]);
   entityCrop('bat', 'bat.png', [6, 6, 6, 6]);
@@ -227,18 +277,56 @@
   entityCrop('spider_head', 'spider/spider.png', [40, 12, 8, 8]);
   entityCrop('spider_body', 'spider/spider.png', [12, 24, 10, 8]);
   entityCrop('spider_leg', 'spider/spider.png', [20, 2, 16, 2]);
+  packedEntityCube('spider_original_head', 'spider_head', 'spider/spider.png', 32, 4, 8, 8, 8);
+  packedEntityCube('spider_original_neck', 'spider_body', 'spider/spider.png', 0, 0, 6, 6, 6);
+  packedEntityCube('spider_original_body', 'spider_leg', 'spider/spider.png', 0, 12, 10, 8, 12);
+  packedEntityCube('spider_original_leg', 'creeper_charge', 'spider/spider.png', 18, 0, 16, 2, 2);
+  packedEntityCube('spider_original_eyes', 'skeleton', 'spider_eyes.png', 32, 4, 8, 8, 8);
 
   entityCrop('slime', 'slime/slime.png', [8, 8, 8, 8]);
   entityCrop('slime_core', 'slime/slime.png', [6, 22, 6, 6]);
   entityCrop('slime_eye', 'slime/slime.png', [34, 2, 2, 2]);
   entityCrop('slime_mouth', 'slime/slime.png', [33, 9, 1, 1]);
+  packedEntityCube('slime_original_outer', 'slime', 'slime/slime.png', 0, 0, 8, 8, 8);
+  packedEntityCube('slime_original_inner', 'slime_core', 'slime/slime.png', 0, 16, 6, 6, 6);
+  packedEntityCube('slime_original_right_eye', 'slime_eye', 'slime/slime.png', 32, 0, 2, 2, 2);
+  packedEntityCube('slime_original_left_eye', 'slime_mouth', 'slime/slime.png', 32, 4, 2, 2, 2);
+  packedEntityCube('slime_original_mouth', 'pig_ear', 'slime/slime.png', 32, 8, 1, 1, 1);
 
   entityCrop('enderman_face', 'enderman/enderman.png', [8, 8, 8, 8]);
   entityCrop('enderman', 'enderman/enderman.png', [20, 20, 8, 12]);
+  packedEntityCube('enderman_original_head', 'enderman', 'enderman/enderman.png', 0, 0, 8, 8, 8);
+  packedEntityCube('enderman_original_headwear', 'enderman_face', 'enderman/enderman.png', 0, 16, 8, 8, 8);
+  packedEntityCube('enderman_original_body', 'pig_tail', 'enderman/enderman.png', 32, 16, 8, 12, 4);
+  packedEntityCube('enderman_original_limb', 'cow_ear', 'enderman/enderman.png', 56, 0, 2, 30, 2);
+  packedEntityCube('enderman_original_eyes', 'cow_horn', 'enderman/enderman_eyes.png', 0, 0, 8, 8, 8);
 
   entityCrop('blaze_face', 'blaze.png', [8, 8, 8, 8]);
   entityCrop('blaze', 'blaze.png', [8, 8, 8, 8]);
   entityCrop('blaze_rod_mob', 'blaze.png', [2, 18, 2, 8]);
+  packedEntityCube('blaze_original_head', 'blaze', 'blaze.png', 0, 0, 8, 8, 8);
+  packedEntityCube('blaze_original_rod', 'blaze_rod_mob', 'blaze.png', 0, 16, 2, 8, 2);
+
+  packedEntityCube('dragon_original_body', 'dragon_body', 'enderdragon/dragon.png', 0, 0, 24, 24, 64);
+  packedEntityCube('dragon_original_body_scale', 'dragon_face', 'enderdragon/dragon.png', 220, 53, 2, 6, 12);
+  packedEntityCube('dragon_original_spine', 'dragon_wing', 'enderdragon/dragon.png', 192, 104, 10, 10, 10);
+  packedEntityCube('dragon_original_spine_scale', 'blaze_face', 'enderdragon/dragon.png', 48, 0, 2, 4, 6);
+  packedEntityCube('dragon_original_upper_head', 'cow_udder', 'enderdragon/dragon.png', 112, 30, 16, 16, 16);
+  packedEntityCube('dragon_original_upper_lip', 'cow_tail', 'enderdragon/dragon.png', 176, 44, 12, 5, 16);
+  packedEntityCube('dragon_original_jaw', 'sheep_wool_cap', 'enderdragon/dragon.png', 176, 65, 12, 4, 16);
+  packedEntityCube('dragon_original_head_scale', 'sheep_ear', 'enderdragon/dragon.png', 0, 0, 2, 4, 6);
+  packedEntityCube('dragon_original_nostril', 'sheep_tail', 'enderdragon/dragon.png', 112, 0, 2, 2, 4);
+  packedEntityCube('dragon_original_eyes', 'chicken_beak', 'enderdragon/dragon_eyes.png', 112, 30, 16, 16, 16);
+  packedEntityCube('dragon_original_wing_bone', 'chicken_wattle', 'enderdragon/dragon.png', 112, 88, 56, 8, 8);
+  packedEntityCrop('dragon_original_wing_skin', 'enderdragon/dragon.png', [0, 88, 56, 56], 'chicken_leg', PACKED_FACE_CELLS.front);
+  packedEntityCube('dragon_original_wing_tip_bone', 'wolf', 'enderdragon/dragon.png', 112, 136, 56, 4, 4);
+  packedEntityCrop('dragon_original_wing_tip_skin', 'enderdragon/dragon.png', [0, 144, 56, 56], 'wolf_face', PACKED_FACE_CELLS.front);
+  packedEntityCube('dragon_original_front_leg', 'cat_face', 'enderdragon/dragon.png', 112, 104, 8, 24, 8);
+  packedEntityCube('dragon_original_front_leg_tip', 'horse', 'enderdragon/dragon.png', 226, 138, 6, 24, 6);
+  packedEntityCube('dragon_original_front_foot', 'horse_face', 'enderdragon/dragon.png', 144, 104, 8, 4, 16);
+  packedEntityCube('dragon_original_rear_leg', 'horse_tail', 'enderdragon/dragon.png', 0, 0, 16, 32, 16);
+  packedEntityCube('dragon_original_rear_leg_tip', 'horse_mane', 'enderdragon/dragon.png', 196, 0, 12, 32, 12);
+  packedEntityCube('dragon_original_rear_foot', 'zombie_face', 'enderdragon/dragon.png', 112, 0, 18, 6, 24);
 
   entityCrop('villager_face', 'villager/villager.png', [8, 8, 8, 10]);
   entityCrop('villager_skin', 'villager/villager.png', [8, 8, 8, 10]);

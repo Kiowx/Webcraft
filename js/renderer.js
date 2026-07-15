@@ -132,14 +132,21 @@
     this._pv = M().create();
     this._handProj = M().create();
     this._handBase = M().create();
+    this._handOffBase = M().create();
     this._handArmMV = M().create();
     this._handItemMV = M().create();
     this._handArmPV = M().create();
     this._handItemPV = M().create();
     this._handAnchor = new Float32Array(3);
+    this._handOffArmMV = M().create();
+    this._handOffItemMV = M().create();
+    this._handOffArmPV = M().create();
+    this._handOffItemPV = M().create();
+    this._handOffAnchor = new Float32Array(3);
     this._handLight = new Float32Array(2);
     this._handAnimPose = {};
     this._handBlockPose = {};
+    this._handOffAnimPose = {};
     this._planes = Array.from({ length: 6 }, () => new Float32Array(4));
     this._skyColors = { top: new Float32Array(3), bot: new Float32Array(3) };
     this._fogCol = new Float32Array(3);
@@ -166,6 +173,8 @@
     };
     this._handArmGpu = makeGpuPart();
     this._handItemGpu = makeGpuPart();
+    this._handOffArmGpu = makeGpuPart();
+    this._handOffItemGpu = makeGpuPart();
     this._entityGpu = {
       normal: makeGpuPart(), flash: makeGpuPart(), charge: makeGpuPart(),
       glint: makeGpuPart(), shadow: makeGpuPart(),
@@ -174,8 +183,10 @@
     this._entityCacheKey = '';
     this._particleCacheKey = '';
     this._handItemId = null;
+    this._handOffItemId = null;
     this._handArmKey = 'steve:classic';
-    uploadGpuPart(this._handArmGpu, playerArmMesh('steve', 'classic'));
+    uploadGpuPart(this._handArmGpu, playerArmMesh('steve', 'classic', true));
+    uploadGpuPart(this._handOffArmGpu, playerArmMesh('steve', 'classic', false));
     return true;
   };
 
@@ -800,15 +811,16 @@
     return handAnimationPose(action, phase, eatProgress, {}, heldStyle);
   };
 
-  function buildFirstPersonArmFrame(out, hasItem, rx, ry, rz, blockBlend) {
+  function buildFirstPersonArmFrame(out, hasItem, rx, ry, rz, blockBlend, right) {
+    const side = right === false ? -1 : 1;
     M().identity(out);
-    M().translate(out, out, hasItem ? 0.69 : 0.62, hasItem ? -0.69 : -0.62, hasItem ? -0.69 : -0.90);
+    M().translate(out, out, side * (hasItem ? 0.69 : 0.62), hasItem ? -0.69 : -0.62, hasItem ? -0.69 : -0.90);
     M().rotX(out, out, rx * U.lerp(0.65, 0.90, blockBlend));
-    M().rotY(out, out, ry * U.lerp(0.65, 0.90, blockBlend));
-    M().rotZ(out, out, rz * U.lerp(0.80, 0.94, blockBlend));
+    M().rotY(out, out, side * ry * U.lerp(0.65, 0.90, blockBlend));
+    M().rotZ(out, out, side * rz * U.lerp(0.80, 0.94, blockBlend));
     M().rotX(out, out, 0.10);
-    M().rotY(out, out, hasItem ? -0.46 : -0.50);
-    M().rotZ(out, out, hasItem ? -0.34 : -0.20);
+    M().rotY(out, out, side * (hasItem ? -0.46 : -0.50));
+    M().rotZ(out, out, side * (hasItem ? -0.34 : -0.20));
     return out;
   }
 
@@ -823,14 +835,17 @@
   Renderer.drawHand = function (st, aspect) {
     const p = st.player;
     const s = p.held();
+    const offhand = p.offhand || null;
     const heldItem = s ? Items.get(s.id) : null;
+    const offhandItem = offhand ? Items.get(offhand.id) : null;
     const heldStyle = heldItem && heldItem.tool ? heldItem.tool.type :
       heldItem && heldItem.block && heldItem.handModel !== 'sprite' ? 'block' : 'item';
     const handSkin = Textures.normalizeSkin ? Textures.normalizeSkin(p.skin) : 'steve';
     const handModel = p.modelType === 'slim' ? 'slim' : 'classic';
     const handArmKey = handSkin + ':' + handModel;
     if (this._handArmKey !== handArmKey) {
-      uploadGpuPart(this._handArmGpu, playerArmMesh(handSkin, handModel));
+      uploadGpuPart(this._handArmGpu, playerArmMesh(handSkin, handModel, true));
+      uploadGpuPart(this._handOffArmGpu, playerArmMesh(handSkin, handModel, false));
       this._handArmKey = handArmKey;
     }
     gl.clear(gl.DEPTH_BUFFER_BIT);
@@ -843,13 +858,17 @@
     const equip = U.smoothstep(U.clamp((p.equipTime || 0) / (p.equipDuration || 0.18), 0, 1));
     const bob = 0;
     const eatProgress = action === 'eat' ? 1 - U.clamp((p.eatTimer || 1.2) / 1.2, 0, 1) : 0;
-    const anim = handAnimationPose(action, phase, eatProgress, this._handAnimPose, heldStyle);
     const blockBlend = U.clamp(p.blockBlend === undefined ? (p.isBlocking ? 1 : 0) : p.blockBlend, 0, 1);
+    const shield = p.shieldStack ? p.shieldStack() : null;
+    const blockingOffhand = blockBlend > 0 && shield && shield.hand === 'offhand';
+    const mainAction = blockingOffhand && action === 'block' ? 'idle' : action;
+    const mainBlockBlend = blockingOffhand ? 0 : blockBlend;
+    const anim = handAnimationPose(mainAction, phase, eatProgress, this._handAnimPose, heldStyle);
     let moveX = anim.x, moveY = anim.y, moveZ = anim.z;
     let actionRX = anim.rx, actionRY = anim.ry, actionRZ = anim.rz;
-    if (blockBlend > 0) {
-      const guard = handAnimationPose('block', blockBlend, 0, this._handBlockPose);
-      const strikeWeight = action === 'attack' ? 0.52 : 0;
+    if (mainBlockBlend > 0) {
+      const guard = handAnimationPose('block', mainBlockBlend, 0, this._handBlockPose);
+      const strikeWeight = mainAction === 'attack' ? 0.52 : 0;
       moveX = guard.x + anim.x * strikeWeight;
       moveY = guard.y + anim.y * strikeWeight;
       moveZ = guard.z + anim.z * strikeWeight;
@@ -857,7 +876,7 @@
       actionRY = guard.ry + anim.ry * strikeWeight;
       actionRZ = guard.rz + anim.rz * strikeWeight;
     }
-    if ((p.blockHitTime || 0) > 0) {
+    if ((p.blockHitTime || 0) > 0 && !blockingOffhand) {
       const hitPhase = 1 - U.clamp(p.blockHitTime / 0.18, 0, 1);
       const recoil = Math.sin(hitPhase * Math.PI);
       moveX += recoil * 0.055;
@@ -870,7 +889,7 @@
     M().translate(base, base, moveX, bob - equip * 0.68 + moveY, moveZ);
 
     const armMV = this._handArmMV;
-    buildFirstPersonArmFrame(armMV, !!s, actionRX, actionRY, actionRZ, blockBlend);
+    buildFirstPersonArmFrame(armMV, !!s, actionRX, actionRY, actionRZ, mainBlockBlend, true);
     const handAnchor = handAnchorFromFrame(armMV, this._handAnchor);
     // Skin limbs are authored along Y. Rotate the complete arm into the
     // first-person reach direction without rotating or stretching its UVs.
@@ -910,11 +929,69 @@
       }
     }
 
+    let offhandItemPV = null;
+    if (offhand) {
+      const offAnim = handAnimationPose(blockingOffhand ? 'block' : 'idle',
+        blockingOffhand ? blockBlend : 0, 0, this._handOffAnimPose, 'item');
+      let offMoveX = offAnim.x, offMoveY = offAnim.y, offMoveZ = offAnim.z;
+      let offActionRX = offAnim.rx, offActionRY = offAnim.ry, offActionRZ = offAnim.rz;
+      if ((p.blockHitTime || 0) > 0 && blockingOffhand) {
+        const hitPhase = 1 - U.clamp(p.blockHitTime / 0.18, 0, 1);
+        const recoil = Math.sin(hitPhase * Math.PI);
+        offMoveX += recoil * 0.055;
+        offMoveZ += recoil * 0.12;
+        offActionRY -= recoil * 0.16;
+        offActionRZ += recoil * 0.09;
+      }
+      const offBase = this._handOffBase;
+      M().identity(offBase);
+      M().translate(offBase, offBase, -offMoveX, bob - equip * 0.68 + offMoveY, offMoveZ);
+
+      const offArmMV = this._handOffArmMV;
+      buildFirstPersonArmFrame(offArmMV, true, offActionRX, offActionRY, offActionRZ,
+        blockingOffhand ? blockBlend : 0, false);
+      const offAnchor = handAnchorFromFrame(offArmMV, this._handOffAnchor);
+      M().rotX(offArmMV, offArmMV, Math.PI * 0.5);
+      M().scale(offArmMV, offArmMV,
+        FIRST_PERSON_ARM_SCALE[0], FIRST_PERSON_ARM_SCALE[1], FIRST_PERSON_ARM_SCALE[2]);
+      M().mul(offArmMV, offBase, offArmMV);
+      M().mul(this._handOffArmPV, proj, offArmMV);
+
+      const pose = offhandItem && offhandItem.display && offhandItem.display.firstPerson
+        ? offhandItem.display.firstPerson
+        : (offhandItem && offhandItem.handPose ? offhandItem.handPose
+          : (offhandItem && offhandItem.block ? BLOCK_HAND_POSE : DEFAULT_HAND_POSE));
+      const offItemMV = this._handOffItemMV;
+      M().identity(offItemMV);
+      const itemPos = pose.attach === 'hand' ? offAnchor : [-pose.pos[0], pose.pos[1], pose.pos[2]];
+      M().translate(offItemMV, offItemMV, itemPos[0], itemPos[1], itemPos[2]);
+      M().rotX(offItemMV, offItemMV, offActionRX);
+      M().rotY(offItemMV, offItemMV, -offActionRY);
+      M().rotZ(offItemMV, offItemMV, -offActionRZ);
+      M().rotX(offItemMV, offItemMV, pose.rot[0]);
+      M().rotY(offItemMV, offItemMV, -pose.rot[1]);
+      M().rotZ(offItemMV, offItemMV, -pose.rot[2]);
+      const grip = pose.grip || DEFAULT_HAND_POSE.grip;
+      M().translate(offItemMV, offItemMV, grip[0] * pose.scale,
+        -grip[1] * pose.scale, -grip[2] * pose.scale);
+      M().scale(offItemMV, offItemMV, pose.scale, pose.scale, pose.scale);
+      M().mul(offItemMV, offBase, offItemMV);
+      offhandItemPV = this._handOffItemPV;
+      M().mul(offhandItemPV, proj, offItemMV);
+
+      if (this._handOffItemId !== offhand.id) {
+        uploadGpuPart(this._handOffItemGpu, handMeshForItem(offhand.id));
+        this._handOffItemId = offhand.id;
+      }
+    }
+
     // ambient light at player position
     const lx = Math.floor(p.x), ly = Math.floor(p.y + 1), lz = Math.floor(p.z);
     const sky = st.world.getSky(lx, ly, lz) / 15;
     const heldDef = s && Blocks.get(s.id);
-    const heldLight = heldDef ? (heldDef.light || 0) / 15 : 0;
+    const offhandDef = offhand && Blocks.get(offhand.id);
+    const heldLight = Math.max(heldDef ? (heldDef.light || 0) / 15 : 0,
+      offhandDef ? (offhandDef.light || 0) / 15 : 0);
     const blk = Math.max(st.world.getBlkLight(lx, ly, lz) / 15, heldLight);
     this._handLight[0] = sky;
     this._handLight[1] = blk;
@@ -940,6 +1017,12 @@
       gl.uniformMatrix4fv(progWorld.uni.uPV, false, itemPV);
       drawGpuPart(this._handItemGpu);
     }
+    if (offhand && offhandItemPV) {
+      gl.uniformMatrix4fv(progWorld.uni.uPV, false, this._handOffArmPV);
+      drawGpuPart(this._handOffArmGpu);
+      gl.uniformMatrix4fv(progWorld.uni.uPV, false, offhandItemPV);
+      drawGpuPart(this._handOffItemGpu);
+    }
     gl.enable(gl.CULL_FACE);
     gl.uniform1f(progWorld.uni.uLightOverride, 0.0);
   };
@@ -962,7 +1045,7 @@
     }
     return cubeGeom(tilesFor(null));
   }
-  function playerArmMesh(skin, modelType) {
+  function playerArmMesh(skin, modelType, right) {
     const tex = (part) => ({
       right:'skin.' + skin + '.' + part + '.right', left:'skin.' + skin + '.' + part + '.left',
       top:'skin.' + skin + '.' + part + '.top', bottom:'skin.' + skin + '.' + part + '.bottom',
@@ -971,10 +1054,12 @@
     const armHalf = modelType === 'slim' ? 0.375 : 0.5;
     const wristY = -FIRST_PERSON_WRIST_OFFSET_PIXELS / FIRST_PERSON_ARM_LENGTH_PIXELS;
     const shoulderY = wristY + 1;
-    const base = cubeGeom(tex('armR'), { x0:-armHalf, x1:armHalf, y0:wristY, y1:shoulderY, z0:-0.5, z1:0.5 });
+    const armPart = right === false ? 'armL' : 'armR';
+    const sleevePart = right === false ? 'sleeveL' : 'sleeveR';
+    const base = cubeGeom(tex(armPart), { x0:-armHalf, x1:armHalf, y0:wristY, y1:shoulderY, z0:-0.5, z1:0.5 });
     const sleeveThickness = 1 / 16;
     const sleeveLength = 0.25 / FIRST_PERSON_ARM_LENGTH_PIXELS;
-    const sleeve = cubeGeom(tex('sleeveR'), {
+    const sleeve = cubeGeom(tex(sleevePart), {
       x0:-armHalf-sleeveThickness, x1:armHalf+sleeveThickness,
       y0:wristY-sleeveLength, y1:shoulderY+sleeveLength,
       z0:-0.5-sleeveThickness, z1:0.5+sleeveThickness,

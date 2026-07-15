@@ -440,6 +440,18 @@
       b.quad(q[1], q[0], q[3], q[2], uv, l, l, l, l, false);
     }
 
+    function rail(b, x, y, z, state) {
+      const raw = Textures.uv('rail');
+      const uv = state & 1
+        ? [[raw[2], raw[3]], [raw[2], raw[1]], [raw[0], raw[1]], [raw[0], raw[3]]]
+        : uvCorners(raw);
+      const light = ownLight(x, y, z, 1.0);
+      const py = y + 1 / 32;
+      const q = [[x, py, z + 1], [x + 1, py, z + 1], [x + 1, py, z], [x, py, z]];
+      b.quad(q[0], q[1], q[2], q[3], uv, light, light, light, light, false);
+      b.quad(q[3], q[2], q[1], q[0], uv, light, light, light, light, false);
+    }
+
     for (let y = yStart; y < yEnd; y++) {
       for (let lz = 0; lz < 16; lz++) {
         for (let lx = 0; lx < 16; lx++) {
@@ -458,6 +470,7 @@
           if (def.shape === 'torch') { torch(opq, x, y, z, Number.isInteger(state) ? state : 0, def.tex.all); continue; }
           if (def.shape === 'bed') { bed(opq, x, y, z, def); continue; }
           if (def.shape === 'ladder') { ladder(opq, x, y, z, Number.isInteger(state) ? state : 3); continue; }
+          if (def.shape === 'rail') { rail(opq, x, y, z, Number.isInteger(state) ? state : 0); continue; }
           if (def.shape === 'model') {
             const elementSource = def.modelElements;
             const elements = typeof elementSource === 'function'

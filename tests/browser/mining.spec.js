@@ -11,6 +11,14 @@ async function clickCanvasControl(page, id) {
   await page.mouse.click(control.x + control.w / 2, control.y + control.h / 2);
 }
 
+async function makeServerPeaceful(page) {
+  await page.evaluate(() => Network.command('/auth playwright-local-test'));
+  await expect.poll(() => page.evaluate(() => Network.status().role)).toBe('admin');
+  await page.waitForTimeout(400);
+  await page.evaluate(() => Network.command('/difficulty peaceful'));
+  await expect.poll(() => page.evaluate(() => game.difficulty)).toBe(0);
+}
+
 test('continuous multiplayer mining confirms the first block before starting the next', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.UI && window.Network && UI.currentScreen() === 'title');
@@ -18,6 +26,7 @@ test('continuous multiplayer mining confirms the first block before starting the
   await page.locator('#nickname-input').fill('MiningBrowser');
   await clickCanvasControl(page, 'join_server');
   await expect.poll(() => page.evaluate(() => Network.isConnected()), { timeout: 30000 }).toBe(true);
+  await makeServerPeaceful(page);
   await expect.poll(() => page.evaluate(() => !!(game.player && game.player.onGround && Math.abs(game.player.vy || 0) < 0.05)),
     { timeout: 15000 }).toBe(true);
   await page.waitForTimeout(250);

@@ -26,6 +26,7 @@ const ADMIN_PASSWORD_GENERATED = !process.env.ADMIN_PASSWORD;
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || crypto.randomBytes(12).toString('base64url'));
 const WHITELIST_SOURCE = String(process.env.WHITELIST || '').trim();
 const WHITELIST = new Set(WHITELIST_SOURCE ? WHITELIST_SOURCE.split(',').map(safeName).map(name => name.toLocaleLowerCase()) : []);
+let whitelistEnabled = WHITELIST.size > 0;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -42,7 +43,7 @@ const MIME = {
 
 const ROLE_PERMISSIONS = {
   user: [],
-  moderator: ['gamemode.self', 'gamemode.others', 'player.ban', 'player.kick', 'item.give', 'item.self'],
+  moderator: ['gamemode.self', 'gamemode.others', 'player.ban', 'player.kick', 'player.teleport', 'player.heal', 'item.give', 'item.self'],
   admin: ['*'],
 };
 
@@ -52,15 +53,25 @@ function loadGameRegistry() {
     Uint8Array, Uint16Array, Uint32Array, Int32Array, Float32Array,
   };
   sandbox.window = sandbox;
-  for (const file of ['util', 'noise', 'blocks', 'world', 'physics', 'craft']) {
+  for (const file of ['util', 'vanilla', 'noise', 'blocks', 'world', 'physics', 'craft']) {
     vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'js', file + '.js'), 'utf8'), sandbox, { filename: file + '.js' });
   }
-  return { Blocks: sandbox.Blocks, Items: sandbox.Items, World: sandbox.World, Physics: sandbox.Physics, Craft: sandbox.Craft };
+  return {
+    Vanilla: sandbox.Vanilla,
+    Blocks: sandbox.Blocks, Items: sandbox.Items, World: sandbox.World,
+    Physics: sandbox.Physics, Craft: sandbox.Craft,
+  };
 }
 
 const Registry = loadGameRegistry();
-const PASSIVE_MOBS = new Set(['pig', 'cow', 'sheep', 'chicken', 'wolf', 'villager', 'cat', 'squid', 'bat']);
+const Vanilla = Registry.Vanilla;
+const MAX_AIR_SECONDS = Vanilla.SURVIVAL.maxAirSeconds;
+const PASSIVE_MOBS = new Set(['pig', 'cow', 'sheep', 'chicken', 'rabbit', 'horse', 'wolf', 'villager', 'cat', 'squid', 'bat']);
 const HOSTILE_MOBS = new Set(['zombie', 'skeleton', 'spider', 'creeper', 'slime', 'enderman', 'blaze', 'ender_dragon']);
+const STONE_AGE_BLOCKS = new Set([
+  Registry.Blocks.ID.STONE, Registry.Blocks.ID.COBBLE, Registry.Blocks.ID.MOSSY,
+  Registry.Blocks.ID.STONE_BRICKS, Registry.Blocks.ID.STONE_SLAB, Registry.Blocks.ID.STONE_DOUBLE_SLAB,
+]);
 const PLAYER_SKINS = new Set(['steve', 'alex', 'miner', 'wanderer']);
 function safeSkin(value) { return PLAYER_SKINS.has(value) ? value : 'steve'; }
 function safeModelType(value) { return value === 'slim' ? 'slim' : 'classic'; }
@@ -70,6 +81,8 @@ const MOB_STATS = Object.freeze({
   cow: { hp: 10, speed: 1.0, w: 0.95, h: 1.35 },
   sheep: { hp: 8, speed: 1.0, w: 0.9, h: 1.3 },
   chicken: { hp: 4, speed: 1.15, w: 0.5, h: 0.8 },
+  rabbit: { hp: 3, speed: 1.8, w: 0.42, h: 0.52 },
+  horse: { hp: 30, speed: 2.25, w: 1.4, h: 1.6 },
   zombie: { hp: 20, speed: 1.9, w: 0.6, h: 1.95 },
   skeleton: { hp: 20, speed: 1.8, w: 0.6, h: 1.95 },
   spider: { hp: 16, speed: 2.2, w: 1.3, h: 0.65 },
@@ -90,7 +103,19 @@ const BREED_FOOD = Object.freeze({
   cow: Registry.Items.IT.WHEAT,
   sheep: Registry.Items.IT.WHEAT,
   chicken: Registry.Items.IT.WHEAT_SEEDS,
+  rabbit: Registry.Items.IT.CARROT,
+  horse: Registry.Items.IT.APPLE,
 });
+const MOB_GOAL_PRIORITY = Object.freeze({ flee: 0, chase: 1, tempt: 2, home: 3, wander: 4 });
+const MOB_NAV_DIRECTIONS = Object.freeze([[1, 0], [-1, 0], [0, 1], [0, -1]]);
+const MOB_NAV_HEIGHT_OFFSETS = Object.freeze([
+  0,
+  0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1,
+  -0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1,
+]);
+const MOB_NAV_SEARCHES_PER_TICK = 2;
+const MOB_NAV_NODES_PER_TICK = 192;
+const MOB_NAV_NODES_PER_SEARCH = 128;
 const VILLAGER_TRADES = Object.freeze({
   unemployed: { cost: 1, id: Registry.Items.IT.BREAD, n: 2, uses: 4 },
   farmer: { cost: 1, id: Registry.Items.IT.BREAD, n: 6, uses: 8 },
@@ -217,6 +242,10 @@ function cleanEquipment(value) {
   return slots;
 }
 
+function cleanOffhand(value) {
+  return cleanStack(value);
+}
+
 function stackIdentity(stack) {
   if (!stack) return '';
   const ench = stack.ench ? Object.keys(stack.ench).sort().map(key => key + ':' + stack.ench[key]).join(',') : '';
@@ -225,7 +254,8 @@ function stackIdentity(stack) {
 
 function inventoryTotals(profile, extraSlots) {
   const totals = new Map();
-  const groups = [profile.inv || [], profile.equipment || [], [profile.cursor || null]].concat(extraSlots || []);
+  const groups = [profile.inv || [], profile.equipment || [], [profile.offhand || null],
+    [profile.cursor || null]].concat(extraSlots || []);
   for (const slots of groups) for (const stack of slots || []) {
     if (!stack) continue;
     const key = stackIdentity(stack);
@@ -243,28 +273,35 @@ function sameInventoryTotals(beforeProfile, afterProfile, beforeExtra, afterExtr
 }
 
 function cleanClientInventory(raw, fallback) {
+  const hasOffhand = !!raw && Object.prototype.hasOwnProperty.call(raw, 'offhand');
   return {
     inv: cleanSlots(raw && raw.inv, 36),
     equipment: cleanEquipment(raw && raw.equipment),
+    offhand: cleanOffhand(hasOffhand ? raw.offhand : fallback.offhand),
     cursor: cleanStack(raw && raw.cursor),
     hotbar: clampInt(raw && raw.hotbar, 0, 8, fallback.hotbar),
   };
 }
 
-function defaultProfile(key, name) {
+function defaultProfile(key, name, spawnPoint) {
+  const spawn = spawnPoint && [spawnPoint.x, spawnPoint.y, spawnPoint.z].every(Number.isFinite)
+    ? { x: Number(spawnPoint.x), y: Number(spawnPoint.y), z: Number(spawnPoint.z) }
+    : { x: 0.5, y: 80, z: 0.5 };
   const inv = Array(36).fill(null);
   inv[0] = { id: Registry.Blocks.ID.CRAFTING, n: 1 };
   inv[1] = { id: Registry.Items.IT.APPLE, n: 3 };
   inv[2] = { id: Registry.Blocks.ID.TORCH, n: 8 };
   return {
     key, name: safeName(name), role: 'user', mode: 'survival',
-    x: 0.5, y: 80, z: 0.5, yaw: 0, pitch: 0,
-    hp: 20, hunger: 20, saturation: 5, air: 10, dead: false,
-    hotbar: 0, inv, equipment: Array(4).fill(null),
+    x: spawn.x, y: spawn.y, z: spawn.z, yaw: 0, pitch: 0,
+    hp: 20, hunger: 20, saturation: 5, air: MAX_AIR_SECONDS, dead: false,
+    hotbar: 0, inv, equipment: Array(4).fill(null), offhand: null,
     inventoryRevision: 0,
     cursor: null,
     xpLevel: 0, xpProgress: 0, statusEffects: [],
-    spawn: { x: 0.5, y: 80, z: 0.5 }, lastSeen: Date.now(),
+    stats: { blocksMined: 0, blocksPlaced: 0, mobsKilled: 0, distanceWalked: 0, itemsCrafted: 0 },
+    advancements: {},
+    spawn: { x: spawn.x, y: spawn.y, z: spawn.z }, lastSeen: Date.now(),
   };
 }
 
@@ -282,12 +319,13 @@ function cleanProfile(value, key, fallbackName) {
   profile.hp = clampInt(source.hp, 0, 20, 20);
   profile.hunger = clampInt(source.hunger, 0, 20, 20);
   profile.saturation = Number.isFinite(+source.saturation) ? clamp(source.saturation, 0, profile.hunger) : profile.saturation;
-  profile.air = Number.isFinite(+source.air) ? clamp(source.air, 0, 10) : profile.air;
+  profile.air = Number.isFinite(+source.air) ? clamp(source.air, 0, MAX_AIR_SECONDS) : profile.air;
   profile.dead = !!source.dead || profile.hp <= 0;
   profile.hotbar = clampInt(source.hotbar, 0, 8, 0);
   profile.inventoryRevision = clampInt(source.inventoryRevision, 0, 2147483647, 0);
   profile.inv = cleanSlots(source.inv, 36);
   profile.equipment = cleanEquipment(source.equipment);
+  profile.offhand = cleanOffhand(source.offhand);
   profile.cursor = cleanStack(source.cursor);
   profile.xpLevel = clampInt(source.xpLevel, 0, 10000, 0);
   profile.xpProgress = clamp(source.xpProgress, 0, 1);
@@ -296,6 +334,12 @@ function cleanProfile(value, key, fallbackName) {
     time: clamp(effect && effect.time, 0, 3600),
     level: clampInt(effect && effect.level, 0, 10, 0),
   })).filter(effect => effect.type && effect.time > 0) : [];
+  const statSource = source.stats && typeof source.stats === 'object' ? source.stats : {};
+  for (const name of Object.keys(profile.stats)) profile.stats[name] = clamp(Number(statSource[name]) || 0, 0, 1000000000);
+  const advancementSource = source.advancements && typeof source.advancements === 'object' ? source.advancements : {};
+  for (const id of ['mine_block', 'craft_item', 'kill_mob']) {
+    if (advancementSource[id]) profile.advancements[id] = clamp(Number(advancementSource[id]) || Date.now(), 1, Date.now());
+  }
   if (source.spawn && [source.spawn.x, source.spawn.y, source.spawn.z].every(Number.isFinite)) {
     profile.spawn = {
       x: clamp(source.spawn.x, -1000000, 1000000),
@@ -304,6 +348,9 @@ function cleanProfile(value, key, fallbackName) {
     };
   }
   profile.lastSeen = Number.isFinite(+source.lastSeen) ? +source.lastSeen : Date.now();
+  if (typeof source.whitelistName === 'string' && source.whitelistName.trim()) {
+    profile.whitelistName = safeName(source.whitelistName).toLocaleLowerCase();
+  }
   return profile;
 }
 
@@ -382,6 +429,11 @@ function loadWorld() {
       keys: new Set(data && data.bans && Array.isArray(data.bans.keys) ? data.bans.keys.map(String) : []),
       names: new Set(data && data.bans && Array.isArray(data.bans.names) ? data.bans.names.map(name => safeName(name).toLocaleLowerCase()) : []),
     },
+    whitelist: {
+      enabled: data && data.whitelist && typeof data.whitelist.enabled === 'boolean' ? data.whitelist.enabled : null,
+      names: data && data.whitelist && Array.isArray(data.whitelist.names)
+        ? data.whitelist.names.map(name => safeName(name).toLocaleLowerCase()).filter(Boolean) : [],
+    },
     timeBase: savedTime, clockStart: Date.now(), timeOfDayBase: savedTimeOfDay,
     weather: data && data.weather === 'rain' ? 'rain' : 'clear',
     weatherTimer: data && Number.isFinite(+data.weatherTimer) ? clamp(data.weatherTimer, 10, 1200) : 240,
@@ -394,6 +446,8 @@ function loadWorld() {
 }
 
 const world = loadWorld();
+for (const name of world.whitelist.names) WHITELIST.add(name);
+if (world.whitelist.enabled !== null) whitelistEnabled = world.whitelist.enabled;
 const simulationWorld = new Registry.World(world.seed);
 simulationWorld.setRngState(world.rngState);
 simulationWorld.time = world.timeBase;
@@ -402,6 +456,44 @@ simulationWorld.spawnedVillages = world.spawnedVillages;
 for (const sign of world.signs.values()) simulationWorld.setBE(sign.x, sign.y, sign.z, { type: 'sign', lines: sign.lines.slice() });
 const players = new Map();
 const entities = new Map();
+
+function canonicalPlayerName(value) {
+  return String(value || '').trim() ? safeName(value).toLocaleLowerCase() : '';
+}
+
+function profileWhitelistClaim(profile) {
+  return profile && typeof profile.whitelistName === 'string'
+    ? canonicalPlayerName(profile.whitelistName) : '';
+}
+
+function findWhitelistOwner(name) {
+  let legacyOwner = null;
+  for (const profile of world.profiles.values()) {
+    const claim = profileWhitelistClaim(profile);
+    if (claim === name) return profile;
+    if (!claim && !legacyOwner && canonicalPlayerName(profile.name) === name) legacyOwner = profile;
+  }
+  return legacyOwner;
+}
+
+function whitelistAdmission(key, requestedName, profile) {
+  const name = canonicalPlayerName(requestedName);
+  const listed = WHITELIST.has(name);
+  if (listed) {
+    const owner = findWhitelistOwner(name);
+    if (owner && owner.key !== key) {
+      return { ok:false, code:'whitelist_identity', message:'该白名单昵称已绑定到其他玩家身份' };
+    }
+    const activeClaim = profileWhitelistClaim(profile);
+    if (activeClaim && activeClaim !== name && WHITELIST.has(activeClaim)) {
+      return { ok:false, code:'whitelist_identity', message:'此玩家身份已绑定到其他白名单昵称' };
+    }
+  }
+  if (whitelistEnabled && (!profile || profile.role !== 'admin') && !listed) {
+    return { ok:false, code:'whitelist', message:'你不在服务器白名单中' };
+  }
+  return { ok:true, claim:listed ? name : '' };
+}
 let nextEntityId = 1;
 let spawnClock = 0;
 let worldTickClock = 0;
@@ -409,6 +501,8 @@ let pruneClock = 0;
 let villageLifeClock = 0;
 let villageRaidClock = 0;
 let chunkWarmupClock = 0;
+let mobNavigationSearchBudget = 0;
+let mobNavigationNodeBudget = 0;
 const chunkWarmupQueue = [];
 const chunkWarmupKeys = new Set();
 let simulationApplying = 0;
@@ -547,6 +641,7 @@ function saveWorldNow() {
     signs: Array.from(world.signs.values()),
     entities: Array.from(entities.values()).filter(entity => entity.type === 'mob' || entity.type === 'item').map(publicEntity),
     bans: { keys: Array.from(world.bans.keys), names: Array.from(world.bans.names) },
+    whitelist: { enabled: whitelistEnabled, names: Array.from(WHITELIST) },
     updatedAt: new Date().toISOString(),
   });
   fs.writeFileSync(TEMP_WORLD_FILE, payload);
@@ -592,23 +687,56 @@ function heldStack(player) {
   return player.profile.inv[clampInt(player.profile.hotbar, 0, 8, 0)] || null;
 }
 
-function playerHasSword(player) {
+function shieldStack(player) {
+  const offhand = player.profile.offhand;
+  const offhandItem = offhand ? Registry.Items.get(offhand.id) : null;
+  if (offhandItem && offhandItem.shield) return { hand:'offhand', stack:offhand };
+  const held = heldStack(player);
+  const heldItem = held ? Registry.Items.get(held.id) : null;
+  return heldItem && heldItem.shield ? { hand:'main', stack:held } : null;
+}
+
+function mainHandConsumesUse(player) {
   const stack = heldStack(player);
   const item = stack ? Registry.Items.get(stack.id) : null;
-  return !!(item && item.tool && item.tool.type === 'sword');
+  if (!item || item.shield) return false;
+  return !!(item.bow || item.food || item.fishing || item.block || item.throwable ||
+    item.bucket || item.bottle || item.ignite || item.bonemeal || item.plant ||
+    item.minecart || item.enderEye || (item.tool && item.tool.type === 'hoe'));
+}
+
+function playerHasShield(player) {
+  return !!shieldStack(player);
+}
+
+function playerCanRaiseShield(player) {
+  return playerHasShield(player) && !mainHandConsumesUse(player);
 }
 
 function playerIsBlocking(player) {
-  return !!(player && player.blocking && !player.profile.dead && playerHasSword(player));
+  return !!(player && player.blocking && !player.profile.dead && Date.now() >= (player.shieldDisabledUntil || 0) && playerCanRaiseShield(player));
 }
 
-function armorPoints(profile) {
-  let points = 0;
+function shieldFacesDamage(player, knockback) {
+  if (!playerIsBlocking(player)) return false;
+  if (!knockback) return true;
+  const x = Number(knockback.x) || 0, z = Number(knockback.z) || 0;
+  const length = Math.hypot(x, z);
+  if (length < 1e-5) return true;
+  const forwardX = Math.sin(player.yaw), forwardZ = -Math.cos(player.yaw);
+  return forwardX * (-x / length) + forwardZ * (-z / length) >= Math.cos(50 * Math.PI / 180);
+}
+
+function armorStats(profile) {
+  let points = 0, toughness = 0, protection = 0;
   for (const stack of profile.equipment) {
     const item = stack ? Registry.Items.get(stack.id) : null;
-    if (item && item.armor) points += item.armor.points;
+    if (!item || !item.armor) continue;
+    points += item.armor.points;
+    toughness += item.armor.toughness || 0;
+    protection += stack.ench && stack.ench.protection ? stack.ench.protection : 0;
   }
-  return Math.min(20, points);
+  return { points:Math.min(20, points), toughness, protection:Math.min(20, protection) };
 }
 
 function publicPlayer(player) {
@@ -621,8 +749,10 @@ function publicPlayer(player) {
     yaw: player.yaw, pitch: player.pitch,
     speed: player.speed, action: player.action, actionPhase: player.actionPhase,
     onGround: player.onGround, sneaking: player.sneaking, sprinting: player.sprinting,
+    riding: player.riding === 'minecart' ? 'minecart' : null,
     blocking: playerIsBlocking(player),
-    held: held ? held.id : 0, mode: profile.mode, hp: profile.hp,
+    held: held ? held.id : 0, offhand: profile.offhand ? profile.offhand.id : 0,
+    mode: profile.mode, hp: profile.hp,
     skin: safeSkin(player.skin), modelType: safeModelType(player.modelType),
     equipment: profile.equipment.map(stack => stack ? { id: stack.id, enchanted: !!stack.ench } : null),
     dead: profile.dead, role: profile.role,
@@ -636,9 +766,11 @@ function profileForClient(profile) {
     hp: profile.hp, hunger: profile.hunger, saturation: profile.saturation, air: profile.air,
     mode: profile.mode, hotbar: profile.hotbar,
     inventoryRevision: profile.inventoryRevision || 0,
-    inv: profile.inv, equipment: profile.equipment, cursor: profile.cursor, spawn: profile.spawn,
+    inv: profile.inv, equipment: profile.equipment, offhand: profile.offhand,
+    cursor: profile.cursor, spawn: profile.spawn,
     xpLevel: profile.xpLevel, xpProgress: profile.xpProgress,
     statusEffects: profile.statusEffects, dead: profile.dead,
+    stats: profile.stats, advancements: profile.advancements,
   };
 }
 
@@ -688,7 +820,7 @@ function finishInventoryDrop(player, socket, dropped) {
   const direction = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)];
   spawnItemEntity(player.x + direction[0] * 0.8, player.y + 1.3, player.z + direction[2] * 0.8, dropped,
     direction[0] * 5, direction[1] * 5 + 2, direction[2] * 5);
-  if (!playerHasSword(player)) player.blocking = false;
+  if (!playerHasShield(player)) player.blocking = false;
   bumpInventory(player);
   sendProfile(player, 'drop');
   scheduleSave();
@@ -707,6 +839,7 @@ function chatPlayer(player, text) {
 }
 
 function findPlayer(query) {
+  if (!String(query || '').trim()) return null;
   const wanted = safeName(query).toLocaleLowerCase();
   let partial = null;
   for (const player of players.values()) {
@@ -780,6 +913,24 @@ function damageHeld(player, amount) {
   if (stack.dur <= 0) player.profile.inv[index] = null;
 }
 
+function damageShield(player, amount) {
+  const shield = shieldStack(player);
+  const stack = shield && shield.stack;
+  if (!stack || stack.dur === undefined) return;
+  let damage = 0;
+  const attempts = Math.max(1, amount || 1);
+  const unbreaking = stack.ench && stack.ench.unbreaking ? stack.ench.unbreaking : 0;
+  for (let index = 0; index < attempts; index++) {
+    if (!unbreaking || simulationWorld.random() < 1 / (unbreaking + 1)) damage++;
+  }
+  stack.dur -= damage;
+  if (stack.dur <= 0) {
+    if (shield.hand === 'offhand') player.profile.offhand = null;
+    else player.profile.inv[player.profile.hotbar] = null;
+    player.blocking = false;
+  }
+}
+
 function consumeHeld(player, amount) {
   const index = player.profile.hotbar;
   const stack = player.profile.inv[index];
@@ -808,7 +959,7 @@ function weaponDamage(player) {
   if (!stack) return 1;
   const item = Registry.Items.get(stack.id);
   let damage = item && item.tool ? item.tool.damage : 1;
-  if (stack.ench && stack.ench.sharpness) damage += stack.ench.sharpness * 1.25;
+  if (stack.ench && stack.ench.sharpness) damage += Vanilla.sharpnessBonus(stack.ench.sharpness);
   return profileCanCreative(player.profile) && player.profile.mode === 'creative' ? 10 : damage;
 }
 
@@ -864,6 +1015,21 @@ function addXP(profile, points) {
   }
 }
 
+function addPlayerStat(player, name, amount) {
+  if (!player || !player.profile || !player.profile.stats || !(name in player.profile.stats)) return false;
+  const previous = Number(player.profile.stats[name]) || 0;
+  const next = clamp(previous + (Number(amount) || 0), 0, 1000000000);
+  if (next === previous) return false;
+  player.profile.stats[name] = next;
+  return true;
+}
+
+function unlockPlayerAdvancement(player, id) {
+  if (!player || !player.profile || !player.profile.advancements || player.profile.advancements[id]) return false;
+  player.profile.advancements[id] = Date.now();
+  return true;
+}
+
 function spawnMobEntity(kind, x, y, z, babyTime) {
   const stats = MOB_STATS[kind];
   if (!stats || entities.size >= 256) return null;
@@ -877,6 +1043,7 @@ function spawnMobEntity(kind, x, y, z, babyTime) {
     age: 0, attackCooldown: 0, fuse: kind === 'creeper' ? -1 : undefined,
     fireTime: 0, fireDamageClock: 0, burning: false,
     aiMode: 'idle', aiTimer: 1 + Math.random() * 3, dirX: 0, dirZ: 0,
+    goalType: 'idle', navPath: null, navPathIndex: 0, navGoalKey: '', navRepathAt: 0,
     targetPlayerId: null, targetMemoryUntil: 0, lastSeenX: x, lastSeenY: y, lastSeenZ: z,
     babyTime, loveUntil: 0, breedCooldownUntil: 0,
     provokedUntil: 0, tamedBy: null, small: false,
@@ -1018,15 +1185,19 @@ function damageArmor(profile, amount) {
 function killPlayer(player, cause, attackerName) {
   const profile = player.profile;
   if (profile.dead) return;
+  if (player.ridingConsumed) addStack(profile, { id: Registry.Items.IT.MINECART, n: 1 });
+  player.riding = null; player.ridingConsumed = false;
   profile.dead = true;
   player.blocking = false;
   profile.hp = 0;
   player.healthLockUntil = Date.now() + 1000;
   for (const stack of profile.inv) if (stack) spawnItemEntity(player.x, player.y + 0.8, player.z, stack, (Math.random() - 0.5) * 3, 3, (Math.random() - 0.5) * 3);
   for (const stack of profile.equipment) if (stack) spawnItemEntity(player.x, player.y + 0.8, player.z, stack, (Math.random() - 0.5) * 3, 3, (Math.random() - 0.5) * 3);
+  if (profile.offhand) spawnItemEntity(player.x, player.y + 0.8, player.z, profile.offhand, (Math.random() - 0.5) * 3, 3, (Math.random() - 0.5) * 3);
   if (profile.cursor) spawnItemEntity(player.x, player.y + 0.8, player.z, profile.cursor, 0, 3, 0);
   profile.inv = Array(36).fill(null);
   profile.equipment = Array(4).fill(null);
+  profile.offhand = null;
   profile.cursor = null;
   bumpInventory(player);
   lockInventory(player, 1000);
@@ -1048,23 +1219,43 @@ function registerPlayerKnockback(player, knockback, now) {
   player.fallRecoveryUntil = 0;
 }
 
-function damagePlayer(player, rawDamage, cause, attackerName, knockback) {
+function damagePlayer(player, rawDamage, cause, attackerName, knockback, options) {
   const profile = player.profile;
   if (profile.dead || profile.mode === 'creative' || Date.now() < (player.hurtUntil || 0)) return false;
-  const blocking = playerIsBlocking(player) &&
+  options = options || {};
+  let shieldDisabled = 0;
+  let blocking = shieldFacesDamage(player, knockback) &&
     (cause === 'mob' || cause === 'arrow' || cause === 'player' || cause === 'explode');
-  if (blocking) rawDamage *= 0.5;
-  if (blocking && knockback) knockback = { x: (knockback.x || 0) * 0.35, y: (knockback.y || 0) * 0.35, z: (knockback.z || 0) * 0.35 };
-  const reduction = armorPoints(profile) * 0.04;
-  const damage = Math.max(1, Math.round(rawDamage * (1 - Math.min(0.8, reduction))));
+  if (blocking && options.disableShield) {
+    player.shieldDisabledUntil = Date.now() + 5000;
+    player.blocking = false;
+    blocking = false;
+    shieldDisabled = 5;
+    sendJSON(player.socket, { t: 'sound', name: 'combat.block', volume: 0.8, pitch: 0.65 });
+  }
+  if (blocking) {
+    if (rawDamage >= 3) damageShield(player, 1 + Math.floor(rawDamage));
+    rawDamage = 0;
+  }
+  if (blocking && knockback) knockback = { x: (knockback.x || 0) * 0.2, y: (knockback.y || 0) * 0.2, z: (knockback.z || 0) * 0.2 };
+  const armorApplies = cause === 'mob' || cause === 'arrow' || cause === 'player' || cause === 'explode' ||
+    cause === 'cactus' || cause === 'lava' || cause === 'fire';
+  let damage = Math.max(0, rawDamage);
+  if (!blocking && armorApplies) {
+    const armor = armorStats(profile);
+    damage = Vanilla.applyProtection(Vanilla.applyArmor(damage, armor.points, armor.toughness), armor.protection);
+  }
+  if (damage > 0) damage = Math.max(0.01, Math.round(damage * 100) / 100);
   const now = Date.now();
   profile.hp = Math.max(0, profile.hp - damage);
   player.healthLockUntil = now + 750;
-  damageArmor(profile, rawDamage);
+  if (!blocking && armorApplies) damageArmor(profile, rawDamage);
   bumpInventory(player);
   player.hurtUntil = now + 500;
   registerPlayerKnockback(player, knockback, now);
-  sendJSON(player.socket, { t: 'combat', damage, hp: profile.hp, cause, blocked: blocking, knockback: knockback || null });
+  const combat = { t:'combat', damage, hp:profile.hp, cause, blocked:blocking, knockback:knockback || null };
+  if (shieldDisabled) combat.shieldDisabled = shieldDisabled;
+  sendJSON(player.socket, combat);
   if (profile.hp <= 0) killPlayer(player, cause, attackerName);
   else sendProfile(player, 'damage');
   return true;
@@ -1074,6 +1265,7 @@ function mobDrops(kind) {
   const IT = Registry.Items.IT, ID = Registry.Blocks.ID;
   const table = {
     pig: [[IT.PORK_RAW, 1, 2]], cow: [[IT.BEEF_RAW, 1, 2], [IT.LEATHER, 0, 2]],
+    rabbit: [], horse: [[IT.LEATHER, 0, 2]],
     sheep: [[IT.MUTTON_RAW, 1, 1], [ID.WOOL, 1, 1]], chicken: [[IT.CHICKEN_RAW, 1, 1], [IT.FEATHER, 0, 2]],
     zombie: [[IT.FLESH, 0, 2]], skeleton: [[IT.BONE, 0, 2], [IT.ARROW, 0, 2]],
     spider: [[IT.STRING, 0, 2]], creeper: [[IT.GUNPOWDER, 1, 2]],
@@ -1086,7 +1278,12 @@ function mobDrops(kind) {
 function killMob(entity, attacker) {
   entities.delete(entity.id);
   for (const stack of mobDrops(entity.kind)) spawnItemEntity(entity.x, entity.y + 0.3, entity.z, stack, (Math.random() - 0.5) * 2, 2, (Math.random() - 0.5) * 2);
-  if (attacker) spawnXPEntity(entity.x, entity.y + Math.max(0.4, entity.h * 0.5), entity.z, HOSTILE_MOBS.has(entity.kind) ? 5 : 1);
+  if (attacker) {
+    spawnXPEntity(entity.x, entity.y + Math.max(0.4, entity.h * 0.5), entity.z, HOSTILE_MOBS.has(entity.kind) ? 5 : 1);
+    const statsChanged = addPlayerStat(attacker, 'mobsKilled', 1);
+    const advancementChanged = HOSTILE_MOBS.has(entity.kind) && unlockPlayerAdvancement(attacker, 'kill_mob');
+    if (statsChanged || advancementChanged) sendProfile(attacker, 'stats');
+  }
   if (entity.kind === 'slime' && !entity.small) {
     for (let index = 0; index < 2; index++) {
       const child = spawnMobEntity('slime', entity.x + (index ? 0.35 : -0.35), entity.y, entity.z, 9999);
@@ -1145,21 +1342,42 @@ function validMeleeTarget(player, target, message) {
 }
 
 function resetPlayerMovementState(player, target) {
+  if (player.ridingConsumed) {
+    addStack(player.profile, { id: Registry.Items.IT.MINECART, n: 1 });
+    bumpInventory(player);
+    lockInventory(player);
+  }
+  player.ridingConsumed = false;
   const probe = {
     x: Number.isFinite(+target.x) ? +target.x : player.x,
     y: Number.isFinite(+target.y) ? +target.y : player.y,
     z: Number.isFinite(+target.z) ? +target.z : player.z,
     w: 0.6, h: 1.8, vx: 0, vy: 0, vz: 0, onGround: false,
   };
-  simulationWorld.ensureChunk(Math.floor(probe.x) >> 4, Math.floor(probe.z) >> 4);
-  Registry.Physics.resolvePenetration(simulationWorld, probe, 4);
-  let grounded = Registry.Physics.supportCount(simulationWorld, probe, probe.x, probe.y, probe.z) > 0;
-  for (let drop = 0.25; !grounded && drop <= 64; drop += 0.25) {
-    const y = probe.y - drop;
-    if (!Registry.Physics.canOccupy(simulationWorld, probe, probe.x, y, probe.z)) continue;
-    if (Registry.Physics.supportCount(simulationWorld, probe, probe.x, y, probe.z) <= 0) continue;
-    probe.y = y;
-    grounded = true;
+  const settle = () => {
+    simulationWorld.ensureChunk(Math.floor(probe.x) >> 4, Math.floor(probe.z) >> 4);
+    Registry.Physics.resolvePenetration(simulationWorld, probe, 4);
+    let supported = Registry.Physics.supportCount(simulationWorld, probe, probe.x, probe.y, probe.z) > 0;
+    for (let drop = 0.25; !supported && drop <= 64; drop += 0.25) {
+      const y = probe.y - drop;
+      if (!Registry.Physics.canOccupy(simulationWorld, probe, probe.x, y, probe.z)) continue;
+      if (Registry.Physics.supportCount(simulationWorld, probe, probe.x, y, probe.z) <= 0) continue;
+      probe.y = y;
+      supported = true;
+    }
+    if (!supported) return false;
+    const bx = Math.floor(probe.x), by = Math.floor(probe.y), bz = Math.floor(probe.z);
+    const feet = simulationWorld.getBlock(bx, by, bz);
+    const head = simulationWorld.getBlock(bx, Math.floor(probe.y + 1.62), bz);
+    return feet !== Registry.Blocks.ID.WATER && feet !== Registry.Blocks.ID.LAVA &&
+      head !== Registry.Blocks.ID.WATER && head !== Registry.Blocks.ID.LAVA;
+  };
+  let grounded = settle();
+  if (!grounded) {
+    const fallback = simulationWorld.findSpawn();
+    probe.x = fallback.x; probe.y = fallback.y; probe.z = fallback.z;
+    probe.vx = probe.vy = probe.vz = 0;
+    grounded = settle();
   }
   const now = Date.now();
 
@@ -1169,6 +1387,7 @@ function resetPlayerMovementState(player, target) {
   player.action = 'idle'; player.actionPhase = 0;
   player.onGround = grounded; player.serverGrounded = grounded;
   player.sneaking = false; player.sprinting = false; player.blocking = false;
+  player.riding = null;
   player.sleeping = false;
   player.mining = null;
   player.airborneSince = 0;
@@ -1268,6 +1487,10 @@ function handleState(socket, message) {
     }
     player.serverGrounded = movement.valid ? movement.grounded : !!player.serverGrounded;
   }
+  const walked = Math.hypot(nx - player.x, nz - player.z);
+  if (walked > 0 && walked <= 2 && player.riding !== 'minecart' && (player.serverGrounded || player.onGround)) {
+    addPlayerStat(player, 'distanceWalked', walked);
+  }
   const velocityElapsed = Math.max(0.025, Math.min(0.25, elapsed));
   player.vx = clamp((nx - player.x) / velocityElapsed, -40, 40);
   player.vy = clamp((ny - player.y) / velocityElapsed, -40, 40);
@@ -1277,7 +1500,7 @@ function handleState(socket, message) {
   player.pitch = clamp(message.pitch, -Math.PI / 2, Math.PI / 2);
   player.speed = clamp(message.speed, 0, player.profile.mode === 'creative' ? 30 : 12);
   player.profile.hotbar = clampInt(message.hotbar, 0, 8, player.profile.hotbar);
-  player.blocking = !!message.blocking && playerHasSword(player);
+  player.blocking = !!message.blocking && playerCanRaiseShield(player) && Date.now() >= (player.shieldDisabledUntil || 0);
   player.action = ['idle', 'attack', 'mine', 'use', 'eat', 'bow', 'fish', 'block'].includes(message.action) ? message.action : 'idle';
   if (player.blocking && player.action === 'mine') player.action = 'block';
   if (!player.blocking && player.action === 'block') player.action = 'idle';
@@ -1304,6 +1527,7 @@ function handleProfile(socket, message) {
   const transaction = clampInt(message.transaction, 1, 2147483647, 0);
   const wasAlive = !profile.dead;
   const oldHeldId = heldStack(player) ? heldStack(player).id : 0;
+  const oldOffhandId = profile.offhand ? profile.offhand.id : 0;
   const clientInventoryRevision = clampInt(raw.inventoryRevision, 0, 2147483647, -1);
   const revisionMatches = clientInventoryRevision === (profile.inventoryRevision || 0);
   const draft = cleanClientInventory(raw, profile);
@@ -1313,6 +1537,7 @@ function handleProfile(socket, message) {
     profile.hotbar = draft.hotbar;
     profile.inv = draft.inv;
     profile.equipment = draft.equipment;
+    profile.offhand = draft.offhand;
     profile.cursor = draft.cursor;
   } else {
     sendProfile(player, 'inventory_conflict', transaction);
@@ -1326,7 +1551,7 @@ function handleProfile(socket, message) {
     profile.hunger = reportedHunger;
     profile.saturation = reportedSaturation;
   }
-  profile.air = clamp(raw.air, 0, 10);
+  profile.air = clamp(raw.air, 0, MAX_AIR_SECONDS);
   const reportedHp = clampInt(raw.hp, 0, 20, profile.hp);
   if (Date.now() >= (player.healthLockUntil || 0)) profile.hp = Math.min(profile.hp, reportedHp);
   if (wasAlive && profile.hp <= 0) {
@@ -1335,7 +1560,11 @@ function handleProfile(socket, message) {
   }
   if (!profileCanCreative(profile)) profile.mode = 'survival';
   const newHeldId = heldStack(player) ? heldStack(player).id : 0;
-  if (oldHeldId !== newHeldId) broadcast({ t: 'player_action', player: publicPlayer(player) }, socket);
+  const newOffhandId = profile.offhand ? profile.offhand.id : 0;
+  if (oldHeldId !== newHeldId || oldOffhandId !== newOffhandId) {
+    if (!playerCanRaiseShield(player)) player.blocking = false;
+    broadcast({ t: 'player_action', player: publicPlayer(player) }, socket);
+  }
   world.dirty = true;
   const now = Date.now();
   if (transaction && !inventoryConflict) {
@@ -1410,6 +1639,7 @@ function handleBlocks(socket, message) {
   const corrections = new Map();
   const completed = [];
   let inventoryChanged = false;
+  let minedCount = 0, placedCount = 0, minedStoneAgeBlock = false;
   const rawEdits = message.edits.slice(0, 128).map(cleanEdit).filter(Boolean);
   const survival = player.profile.mode !== 'creative';
   if (survival && (!Number.isInteger(message.inventoryRevision) || message.inventoryRevision !== (player.profile.inventoryRevision || 0))) {
@@ -1554,14 +1784,29 @@ function handleBlocks(socket, message) {
       if (damageTool) damageHeld(player, 1);
       if (consume || replace || damageTool) inventoryChanged = true;
     }
+    if (currentId !== edit.id) {
+      const topHalf = currentId === Registry.Blocks.ID.OAK_DOOR_TOP || currentId === Registry.Blocks.ID.IRON_DOOR_TOP ||
+        edit.id === Registry.Blocks.ID.OAK_DOOR_TOP || edit.id === Registry.Blocks.ID.IRON_DOOR_TOP;
+      const liquid = currentId === Registry.Blocks.ID.WATER || currentId === Registry.Blocks.ID.LAVA;
+      if (edit.id === 0 && currentId !== 0 && !topHalf && !liquid) {
+        minedCount++;
+        if (STONE_AGE_BLOCKS.has(currentId)) minedStoneAgeBlock = true;
+      }
+      else if (edit.id !== 0 && !topHalf && (currentId === 0 || Registry.Blocks.get(currentId).replaceable)) placedCount++;
+    }
     accepted.push(edit);
     acceptedByKey.set(editKey(edit.x, edit.y, edit.z), edit);
   }
   acceptEdits(accepted, player);
+  const statsChanged = addPlayerStat(player, 'blocksMined', minedCount) |
+    addPlayerStat(player, 'blocksPlaced', placedCount);
+  const advancementChanged = minedStoneAgeBlock && unlockPlayerAdvancement(player, 'mine_block');
   if (inventoryChanged) {
     bumpInventory(player);
     lockInventory(player);
     sendProfile(player, 'block_action');
+  } else if (statsChanged || advancementChanged) {
+    sendProfile(player, 'stats');
   }
   if (corrections.size) sendJSON(socket, { t: 'blocks', edits: Array.from(corrections.values()), rejected: true });
   for (const result of completed) sendJSON(socket, Object.assign({ t: 'mine_state', state: 'completed' }, result));
@@ -1624,6 +1869,7 @@ function handleContainer(socket, message) {
   if (draft) {
     player.profile.inv = draft.inv;
     player.profile.equipment = draft.equipment;
+    player.profile.offhand = draft.offhand;
     player.profile.cursor = draft.cursor;
     player.profile.hotbar = draft.hotbar;
   }
@@ -1677,12 +1923,82 @@ function setPlayerMode(target, mode) {
   scheduleSave();
 }
 
+function teleportPlayer(target, x, y, z, reason) {
+  x = clamp(x, -1000000, 1000000); y = clamp(y, -64, 320); z = clamp(z, -1000000, 1000000);
+  simulationWorld.ensureChunk(Math.floor(x) >> 4, Math.floor(z) >> 4);
+  target.x = x; target.y = y; target.z = z;
+  target.vx = target.vy = target.vz = 0;
+  target.profile.x = x; target.profile.y = y; target.profile.z = z;
+  target.mining = null;
+  if (target.ridingConsumed) {
+    addStack(target.profile, { id:Registry.Items.IT.MINECART, n:1 });
+    bumpInventory(target); lockInventory(target);
+  }
+  target.riding = null; target.ridingConsumed = false;
+  target.knockbackUntil = 0; target.knockbackPeak = null;
+  sendJSON(target.socket, { t:'position', x, y, z, reason:reason || 'teleport' });
+  sendProfile(target, reason || 'teleport');
+  scheduleSave();
+}
+
+function restorePlayer(target, heal, feed) {
+  if (heal) { target.profile.hp = 20; target.profile.dead = false; target.healthLockUntil = Date.now() + 500; }
+  if (feed) { target.profile.hunger = 20; target.profile.saturation = 5; }
+  sendProfile(target, heal && feed ? 'restore' : heal ? 'heal' : 'feed');
+  scheduleSave();
+}
+
+function clearPlayerItems(target, itemId, amount) {
+  let remaining = Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : Infinity;
+  let removed = 0;
+  const clearArray = (slots) => {
+    for (let index = 0; index < slots.length && remaining > 0; index++) {
+      const stack = slots[index];
+      if (!stack || (Number.isInteger(itemId) && stack.id !== itemId)) continue;
+      const take = Math.min(stack.n, remaining);
+      stack.n -= take; remaining -= take; removed += take;
+      if (stack.n <= 0) slots[index] = null;
+    }
+  };
+  clearArray(target.profile.inv); clearArray(target.profile.equipment);
+  if (target.profile.offhand && remaining > 0 && (!Number.isInteger(itemId) || target.profile.offhand.id === itemId)) {
+    const take = Math.min(target.profile.offhand.n, remaining);
+    target.profile.offhand.n -= take; remaining -= take; removed += take;
+    if (target.profile.offhand.n <= 0) target.profile.offhand = null;
+  }
+  if (target.profile.cursor && remaining > 0 && (!Number.isInteger(itemId) || target.profile.cursor.id === itemId)) {
+    const take = Math.min(target.profile.cursor.n, remaining);
+    target.profile.cursor.n -= take; removed += take;
+    if (target.profile.cursor.n <= 0) target.profile.cursor = null;
+  }
+  if (removed) { bumpInventory(target); lockInventory(target); sendProfile(target, 'clear'); scheduleSave(); }
+  return removed;
+}
+
+function kickPlayer(target, reason) {
+  const message = safeText(reason, 80) || '已被管理员请出服务器';
+  sendJSON(target.socket, { t:'error', code:'kicked', message });
+  target.socket.close(1008, 'kicked');
+}
+
+function summonMob(kind, x, y, z) {
+  kind = String(kind || '').toLocaleLowerCase();
+  if (!MOB_STATS[kind]) return null;
+  if (![x,y,z].every(Number.isFinite)) return null;
+  simulationWorld.ensureChunk(Math.floor(x) >> 4, Math.floor(z) >> 4);
+  return spawnMobEntity(kind, clamp(x, -1000000, 1000000), clamp(y, 0, 255), clamp(z, -1000000, 1000000));
+}
+
+function statusLine() {
+  return `players=${players.size}/${MAX_PLAYERS} entities=${entities.size} edits=${world.edits.size} profiles=${world.profiles.size} time=${worldClock().timeOfDay.toFixed(3)} weather=${world.weather} difficulty=${world.difficulty}`;
+}
+
 function executeCommand(player, text) {
   const args = parseCommand(text);
   const command = String(args.shift() || '').replace(/^\//, '').toLocaleLowerCase();
   if (!command) return;
   if (command === 'help') {
-    chatSystem('命令：/auth /list /gamemode /give /item /ban /pardon /perm /time /weather /difficulty /spawn', player);
+    chatSystem('命令：/auth /list /status /seed /gamemode /give /item /tp /spawn /setspawn /heal /feed /kill /clear /kick /ban /pardon /perm /time /weather /difficulty /summon /say /save', player);
     return;
   }
   if (command === 'auth') {
@@ -1703,6 +2019,81 @@ function executeCommand(player, text) {
   if (command === 'list') {
     chatSystem('在线玩家（' + players.size + '/' + MAX_PLAYERS + '）：' + Array.from(players.values()).map(item => item.name).join('、'), player);
     return;
+  }
+  if (command === 'status') { chatSystem('服务器状态：' + statusLine(), player); return; }
+  if (command === 'seed') { chatSystem('世界种子：' + world.seed, player); return; }
+  if (command === 'tp' || command === 'teleport') {
+    if (!requirePermission(player, 'player.teleport')) return;
+    let target = player, destination = null;
+    if (args.length === 1) destination = findPlayer(args[0]);
+    else if (args.length === 2) { target = findPlayer(args[0]); destination = findPlayer(args[1]); }
+    else if (args.length === 3) destination = { x:Number(args[0]), y:Number(args[1]), z:Number(args[2]) };
+    else if (args.length === 4) { target = findPlayer(args[0]); destination = { x:Number(args[1]), y:Number(args[2]), z:Number(args[3]) }; }
+    if (!target || !destination || ![destination.x,destination.y,destination.z].every(Number.isFinite)) {
+      chatSystem('用法：/tp [玩家] <目标玩家|x y z>', player); return;
+    }
+    teleportPlayer(target, destination.x, destination.y, destination.z, 'teleport');
+    chatSystem('已传送 ' + target.name, player); return;
+  }
+  if (command === 'setspawn') {
+    const coordinateOnly = args.length >= 3 && args.slice(0,3).every(value => Number.isFinite(Number(value)));
+    const target = args[0] && !coordinateOnly ? findPlayer(args[0]) : player;
+    if (!target) { chatSystem('找不到目标玩家', player); return; }
+    if (target !== player && !requirePermission(player, 'world.manage')) return;
+    const offset = args[0] && !coordinateOnly ? 1 : 0;
+    const coordinates = args.length >= offset + 3 ? args.slice(offset, offset + 3).map(Number) : [target.x, target.y, target.z];
+    if (!coordinates.every(Number.isFinite)) { chatSystem('用法：/setspawn [玩家] [x y z]', player); return; }
+    target.profile.spawn = { x:clamp(coordinates[0],-1000000,1000000), y:clamp(coordinates[1],-64,320), z:clamp(coordinates[2],-1000000,1000000) };
+    sendProfile(target, 'spawn'); scheduleSave(); chatSystem('已设置 ' + target.name + ' 的重生点', player); return;
+  }
+  if (command === 'heal' || command === 'feed') {
+    if (!requirePermission(player, 'player.heal')) return;
+    const target = args[0] ? findPlayer(args[0]) : player;
+    if (!target) { chatSystem('找不到目标玩家', player); return; }
+    restorePlayer(target, command === 'heal', command === 'feed');
+    chatSystem('已' + (command === 'heal' ? '治疗 ' : '恢复饱食度 ') + target.name, player); return;
+  }
+  if (command === 'kill') {
+    const target = args[0] ? findPlayer(args[0]) : player;
+    if (!target) { chatSystem('找不到目标玩家', player); return; }
+    if (target !== player && !requirePermission(player, 'player.kill')) return;
+    killPlayer(target, 'command', player.name); return;
+  }
+  if (command === 'clear') {
+    if (!requirePermission(player, 'player.inventory')) return;
+    const target = args[0] ? findPlayer(args.shift()) : player;
+    if (!target) { chatSystem('找不到目标玩家', player); return; }
+    const hasItemFilter = args.length > 0;
+    const itemId = hasItemFilter ? resolveItem(args.shift()) : undefined;
+    if (hasItemFilter && !Number.isInteger(itemId)) { chatSystem('未知物品', player); return; }
+    const amount = args.length ? clampInt(args.shift(), 1, 2304, 1) : Infinity;
+    const removed = clearPlayerItems(target, itemId, amount);
+    chatSystem('已清除 ' + target.name + ' 的 ' + removed + ' 个物品', player); return;
+  }
+  if (command === 'kick') {
+    if (!requirePermission(player, 'player.kick')) return;
+    const target = findPlayer(args.shift());
+    if (!target) { chatSystem('找不到目标玩家', player); return; }
+    if (target.profile.role === 'admin' && player.profile.role !== 'admin') { chatSystem('不能请出管理员', player); return; }
+    chatSystem(target.name + ' 已被请出服务器'); kickPlayer(target, args.join(' ')); return;
+  }
+  if (command === 'say') {
+    if (!requirePermission(player, 'server.broadcast')) return;
+    const text = safeText(args.join(' '), 160);
+    if (text) chatSystem('[服务器] ' + text); return;
+  }
+  if (command === 'summon') {
+    if (!requirePermission(player, 'world.summon')) return;
+    const kind = args.shift();
+    const coordinates = args.length >= 3 ? args.slice(0,3).map(Number) : [player.x, player.y, player.z];
+    const entity = summonMob(kind, coordinates[0], coordinates[1], coordinates[2]);
+    if (!entity) chatSystem('用法：/summon <生物ID> [x y z]', player);
+    else { scheduleSave(); chatSystem('已召唤 ' + entity.kind, player); }
+    return;
+  }
+  if (command === 'save') {
+    if (!requirePermission(player, 'world.manage')) return;
+    world.dirty = true; saveWorldNow(); chatSystem('世界已保存', player); return;
   }
   if (command === 'gamemode' || command === 'gm') {
     const modeArg = String(args[0] || '').toLocaleLowerCase();
@@ -1756,6 +2147,7 @@ function executeCommand(player, text) {
   }
   if (command === 'pardon') {
     if (!requirePermission(player, 'permission.manage')) return;
+    if (!args[0]) { chatSystem('用法：/pardon <玩家>', player); return; }
     const name = safeName(args[0]).toLocaleLowerCase();
     world.bans.names.delete(name);
     for (const profile of world.profiles.values()) if (profile.name.toLocaleLowerCase() === name) world.bans.keys.delete(profile.key);
@@ -1828,7 +2220,7 @@ function handleAction(socket, message) {
   if (message.action === 'respawn') {
     const profile = player.profile;
     if (!profile.dead) return;
-    profile.dead = false; profile.hp = 20; profile.hunger = 20; profile.saturation = 5; profile.air = 10;
+    profile.dead = false; profile.hp = 20; profile.hunger = 20; profile.saturation = 5; profile.air = MAX_AIR_SECONDS;
     profile.statusEffects = [];
     resetPlayerMovementState(player, profile.spawn);
     sendProfile(player, 'respawn');
@@ -1866,19 +2258,46 @@ function handleAction(socket, message) {
     const hotbar = clampInt(message.hotbar, 0, 8, player.profile.hotbar);
     if (hotbar !== player.profile.hotbar) {
       player.profile.hotbar = hotbar;
-      if (!playerHasSword(player)) player.blocking = false;
+      if (!playerCanRaiseShield(player)) player.blocking = false;
       broadcast({ t: 'player_action', player: publicPlayer(player) }, socket);
     }
     return;
   }
   if (message.action === 'block_state') {
     player.profile.hotbar = clampInt(message.hotbar, 0, 8, player.profile.hotbar);
-    player.blocking = !!message.active && playerHasSword(player);
+    player.blocking = !!message.active && playerCanRaiseShield(player) && Date.now() >= (player.shieldDisabledUntil || 0);
     player.sprinting = player.blocking ? false : player.sprinting;
     if (player.blocking && (player.action === 'idle' || player.action === 'mine')) player.action = 'block';
     if (!player.blocking && player.action === 'block') player.action = 'idle';
     if (player.action === 'block' || player.action === 'idle') player.actionPhase = player.blocking ? 1 : 0;
     broadcast({ t: 'player_action', player: publicPlayer(player) }, socket);
+    return;
+  }
+  if (message.action === 'mount_minecart') {
+    const x = Number(message.x), y = Number(message.y), z = Number(message.z);
+    if (player.riding || ![x,y,z].every(Number.isInteger) || !validReach(player, { x, y, z }, 5.1)) return;
+    if (!Number.isInteger(message.inventoryRevision) || message.inventoryRevision !== (player.profile.inventoryRevision || 0)) {
+      sendProfile(player, 'inventory_conflict'); return;
+    }
+    simulationWorld.ensureChunk(x >> 4, z >> 4);
+    const held = heldStack(player), item = held ? Registry.Items.get(held.id) : null;
+    if (simulationWorld.getBlock(x, y, z) !== Registry.Blocks.ID.RAIL || !item || !item.minecart) return;
+    if (player.profile.mode !== 'creative' && !consumeHeld(player, 1)) return;
+    player.riding = 'minecart'; player.ridingConsumed = player.profile.mode !== 'creative';
+    player.x = x + 0.5; player.y = y + 0.01; player.z = z + 0.5;
+    player.vx = player.vy = player.vz = 0;
+    bumpInventory(player); lockInventory(player); sendProfile(player, 'vehicle'); scheduleSave();
+    sendJSON(player.socket, { t:'position', x:player.x, y:player.y, z:player.z, reason:'minecart' });
+    broadcast({ t:'player_action', player:publicPlayer(player) }, player.socket);
+    return;
+  }
+  if (message.action === 'dismount_minecart') {
+    if (player.riding !== 'minecart') return;
+    player.riding = null;
+    if (player.ridingConsumed) addStack(player.profile, { id:Registry.Items.IT.MINECART, n:1 });
+    player.ridingConsumed = false;
+    bumpInventory(player); lockInventory(player); sendProfile(player, 'vehicle'); scheduleSave();
+    broadcast({ t:'player_action', player:publicPlayer(player) }, player.socket);
     return;
   }
   if (message.action === 'craft') {
@@ -1911,6 +2330,8 @@ function handleAction(socket, message) {
 
     player.profile.inv = draft.inv;
     player.profile.cursor = draft.cursor;
+    addPlayerStat(player, 'itemsCrafted', output.n);
+    if (output.id === Registry.Blocks.ID.CRAFTING) unlockPlayerAdvancement(player, 'craft_item');
     bumpInventory(player);
     lockInventory(player);
     sendProfile(player, 'craft', transaction);
@@ -1931,21 +2352,37 @@ function handleAction(socket, message) {
     return;
   }
   if (message.action === 'use_station') {
+    const station = String(message.station || '');
+    const stationResult = (ok, code, text) => {
+      const result = {
+        t:'station_result', ok:!!ok, station, code, message:text,
+        inventoryRevision:player.profile.inventoryRevision || 0,
+      };
+      if (Number.isInteger(message.transaction)) result.transaction = clampInt(message.transaction, 0, 2147483647, 0);
+      sendJSON(socket, result);
+    };
     if (!Number.isInteger(message.inventoryRevision) || message.inventoryRevision !== (player.profile.inventoryRevision || 0)) {
-      sendProfile(player, 'inventory_conflict'); return;
+      sendProfile(player, 'inventory_conflict');
+      stationResult(false, 'inventory_conflict', '背包状态已变化，请重试');
+      return;
     }
     const x = Number(message.x), y = Number(message.y), z = Number(message.z);
-    const station = String(message.station || '');
     const wantedBlock = station === 'enchant' ? Registry.Blocks.ID.ENCHANTING_TABLE :
       station === 'repair' ? Registry.Blocks.ID.ANVIL : station === 'brew' ? Registry.Blocks.ID.BREWING_STAND : 0;
-    if (!wantedBlock || ![x, y, z].every(Number.isInteger) || !validReach(player, { x, y, z }, 5.1)) return;
+    if (!wantedBlock) { stationResult(false, 'invalid_station', '未知工作站'); return; }
+    if (![x, y, z].every(Number.isInteger)) { stationResult(false, 'invalid_position', '工作站坐标无效'); return; }
+    if (!validReach(player, { x, y, z }, 5.1)) { stationResult(false, 'out_of_reach', '距离工作站太远'); return; }
     simulationWorld.ensureChunk(x >> 4, z >> 4);
-    if (simulationWorld.getBlock(x, y, z) !== wantedBlock) return;
+    if (simulationWorld.getBlock(x, y, z) !== wantedBlock) {
+      stationResult(false, 'station_missing', '目标位置没有对应工作站'); return;
+    }
     const held = heldStack(player);
     const item = held ? Registry.Items.get(held.id) : null;
     let changed = false;
     if (station === 'enchant') {
-      if (!held || !item || !item.enchantable || (item.enchantable === 'book' && held.n !== 1)) return;
+      if (!held || !item || !item.enchantable || (item.enchantable === 'book' && held.n !== 1)) {
+        stationResult(false, 'invalid_item', '手持物品无法附魔'); return;
+      }
       const choices = item.armor ? ['protection', 'unbreaking'] : item.bow ? ['power', 'unbreaking'] : item.tool ?
         (item.tool.type === 'sword' ? ['sharpness', 'unbreaking'] : ['efficiency', 'unbreaking']) :
         ['protection', 'sharpness', 'efficiency', 'power', 'unbreaking'];
@@ -1953,7 +2390,9 @@ function handleAction(socket, message) {
       const current = held.ench || {};
       const level = current[key] || 0;
       const cost = clampInt(level + 1, 1, 3, 1);
-      if (level >= 3 || player.profile.xpLevel < cost || itemCount(player.profile, Registry.Items.IT.LAPIS) < cost) return;
+      if (level >= 3) { stationResult(false, 'max_level', '该附魔已达到最高等级'); return; }
+      if (player.profile.xpLevel < cost) { stationResult(false, 'insufficient_xp', '经验等级不足'); return; }
+      if (itemCount(player.profile, Registry.Items.IT.LAPIS) < cost) { stationResult(false, 'missing_material', '青金石不足'); return; }
       removeItem(player.profile, Registry.Items.IT.LAPIS, cost);
       player.profile.xpLevel -= cost;
       player.profile.xpProgress = 0;
@@ -1962,7 +2401,10 @@ function handleAction(socket, message) {
     } else if (station === 'repair') {
       const maximum = held ? Registry.Items.durabilityOf(held.id) : 0;
       const material = item && item.armor ? item.armor.repair : item && item.repair;
-      if (!held || !maximum || held.dur >= maximum || !material || player.profile.xpLevel < 1 || itemCount(player.profile, material) < 1) return;
+      if (!held || !maximum || !material) { stationResult(false, 'invalid_item', '手持物品无法修复'); return; }
+      if (held.dur >= maximum) { stationResult(false, 'not_damaged', '物品无需修复'); return; }
+      if (player.profile.xpLevel < 1) { stationResult(false, 'insufficient_xp', '经验等级不足'); return; }
+      if (itemCount(player.profile, material) < 1) { stationResult(false, 'missing_material', '缺少修复材料'); return; }
       removeItem(player.profile, material, 1);
       held.dur = Math.min(maximum, held.dur + Math.ceil(maximum * 0.25));
       player.profile.xpLevel--;
@@ -1975,13 +2417,17 @@ function handleAction(socket, message) {
       } else if (held && held.id === Registry.Items.IT.AWKWARD_POTION) {
         ingredient = Registry.Items.IT.GLOWSTONE_DUST; result = Registry.Items.IT.HEALING_POTION;
       }
-      if (!ingredient || itemCount(player.profile, ingredient) < 1) return;
+      if (!ingredient) { stationResult(false, 'invalid_recipe', '手持物品没有可用的酿造配方'); return; }
+      if (itemCount(player.profile, ingredient) < 1) { stationResult(false, 'missing_material', '缺少酿造材料'); return; }
       removeItem(player.profile, ingredient, 1);
       player.profile.inv[player.profile.hotbar] = { id: result, n: 1 };
       changed = true;
     }
     if (changed) {
       bumpInventory(player); lockInventory(player); sendProfile(player, 'station'); scheduleSave();
+      stationResult(true, 'ok', station === 'enchant' ? '附魔完成' : station === 'repair' ? '修复完成' : '酿造完成');
+    } else {
+      stationResult(false, 'operation_failed', '工作站操作未完成');
     }
     return;
   }
@@ -2015,8 +2461,8 @@ function handleAction(socket, message) {
       return;
     }
     const source = String(message.source || '');
-    if (source !== 'inv' && source !== 'armor' && source !== 'cursor') return;
-    const index = clampInt(message.index, 0, source === 'armor' ? 3 : 35, 0);
+    if (source !== 'inv' && source !== 'armor' && source !== 'offhand' && source !== 'cursor') return;
+    const index = clampInt(message.index, 0, source === 'armor' ? 3 : source === 'inv' ? 35 : 0, 0);
     const expectedId = clampInt(message.expectedId, 1, 65535, 0);
     let location = null;
     let stack = player.profile.cursor;
@@ -2028,6 +2474,9 @@ function handleAction(socket, message) {
     } else if (source === 'armor') {
       stack = player.profile.equipment[index];
       location = 'armor';
+    } else if (source === 'offhand') {
+      stack = player.profile.offhand;
+      location = 'offhand';
     } else if (source === 'cursor') {
       stack = player.profile.cursor;
       location = 'cursor';
@@ -2046,7 +2495,8 @@ function handleAction(socket, message) {
     if (stack.n <= 0) {
       if (location === 'cursor') player.profile.cursor = null;
       else if (location === 'inv') player.profile.inv[index] = null;
-      else player.profile.equipment[index] = null;
+      else if (location === 'armor') player.profile.equipment[index] = null;
+      else player.profile.offhand = null;
     }
     finishInventoryDrop(player, socket, dropped);
     return;
@@ -2272,19 +2722,25 @@ function handleAction(socket, message) {
   const elapsed = player.lastAttack ? now - player.lastAttack : interval;
   if (elapsed < 80) return;
   const attackStrength = clamp(elapsed / interval, 0, 1);
-  const damageScale = player.profile.mode === 'creative' ? 1 : 0.2 + attackStrength * attackStrength * 0.8;
+  const damageScale = player.profile.mode === 'creative' ? 1 : Vanilla.attackScale(attackStrength);
+  const attackItem = heldStack(player) ? Registry.Items.get(heldStack(player).id) : null;
+  const critical = player.profile.mode === 'survival' && attackStrength > 0.9 && !player.onGround &&
+    (player.vy || 0) < -0.05 && !player.sprinting;
+  const attackDamage = weaponDamage(player) * damageScale * (critical ? 1.5 : 1);
+  const disablesShield = !!(attackItem && attackItem.tool && attackItem.tool.type === 'axe' && attackStrength > 0.9);
   player.lastAttack = now;
   const targetPlayer = message.targetType === 'player' ? players.get(String(message.target)) : null;
   if (targetPlayer && targetPlayer !== player && validMeleeTarget(player, targetPlayer, message)) {
     const dx = targetPlayer.x - player.x, dz = targetPlayer.z - player.z, distance = Math.hypot(dx, dz) || 1;
     const knockback = attackStrength > 0.9 ? 7 : 3.5;
-    const hit = damagePlayer(targetPlayer, weaponDamage(player) * damageScale, 'player', player.name,
-      { x: dx / distance * knockback, y: attackStrength > 0.9 ? 3.5 : 1.6, z: dz / distance * knockback });
+    const hit = damagePlayer(targetPlayer, attackDamage, 'player', player.name,
+      { x: dx / distance * knockback, y: attackStrength > 0.9 ? 3.5 : 1.6, z: dz / distance * knockback },
+      { disableShield: disablesShield });
     if (player.profile.mode !== 'creative') damageHeld(player, 1);
     bumpInventory(player);
     lockInventory(player);
     sendProfile(player, 'attack');
-    sendJSON(player.socket, { t: 'attack_result', hit, targetType: 'player', target: targetPlayer.id, hp: targetPlayer.profile.hp });
+    sendJSON(player.socket, { t: 'attack_result', hit, critical, targetType: 'player', target: targetPlayer.id, hp: targetPlayer.profile.hp });
     return;
   }
   if (targetPlayer) { sendJSON(player.socket, { t: 'attack_result', hit: false, targetType: 'player', target: targetPlayer.id }); return; }
@@ -2294,7 +2750,8 @@ function handleAction(socket, message) {
     sendJSON(player.socket, { t: 'attack_result', hit: false, targetType: 'entity', target: entity.id });
     return;
   }
-  entity.hp -= weaponDamage(player) * damageScale;
+  entity.hp -= attackDamage;
+  if (entity.hp > 0 && PASSIVE_MOBS.has(entity.kind)) startMobFlee(entity, player.x, player.z, player.id);
   if (entity.kind === 'enderman') {
     entity.provokedUntil = now + 20000;
     if (Math.random() < 0.45) {
@@ -2310,7 +2767,21 @@ function handleAction(socket, message) {
   if (player.profile.mode !== 'creative') damageHeld(player, 1);
   bumpInventory(player);
   lockInventory(player);
-  sendJSON(player.socket, { t: 'attack_result', hit: true, targetType: 'entity', target: entity.id, hp: Math.max(0, entity.hp) });
+  let sweep = 0;
+  const swordSweep = attackStrength > 0.9 && player.onGround && !player.sprinting && attackItem &&
+    attackItem.tool && attackItem.tool.type === 'sword';
+  if (swordSweep) {
+    const sweepDamage = 1;
+    for (const other of Array.from(entities.values())) {
+      if (other === entity || other.type !== 'mob') continue;
+      if (Math.abs(other.y - entity.y) > 1.2 || Math.hypot(other.x - entity.x, other.z - entity.z) > 1.5) continue;
+      other.hp -= sweepDamage;
+      sweep++;
+      if (other.hp > 0 && PASSIVE_MOBS.has(other.kind)) startMobFlee(other, player.x, player.z, player.id);
+      if (other.hp <= 0) killMob(other, player);
+    }
+  }
+  sendJSON(player.socket, { t: 'attack_result', hit: true, critical, sweep, targetType: 'entity', target: entity.id, hp: Math.max(0, entity.hp) });
   if (entity.hp <= 0) killMob(entity, player);
   sendProfile(player, 'attack');
 }
@@ -2472,7 +2943,7 @@ function rayAabb(ox, oy, oz, dx, dy, dz, entity, maxDistance) {
   return near <= maxDistance ? near : null;
 }
 
-function findMobSpawnY(kind, x, z) {
+function findMobSpawnY(kind, x, z, requireNaturalGround) {
   const stats = MOB_STATS[kind];
   if (!stats) return null;
   const bx = Math.floor(x), bz = Math.floor(z);
@@ -2484,7 +2955,7 @@ function findMobSpawnY(kind, x, z) {
     const id = simulationWorld.getBlock(bx, y, bz);
     const def = Registry.Blocks.get(id);
     if (!def.solid || def.liquid) continue;
-    if (PASSIVE_MOBS.has(kind) && kind !== 'bat' && kind !== 'squid' && id !== ID.GRASS && id !== ID.GRASS_SNOW) continue;
+    if (requireNaturalGround !== false && PASSIVE_MOBS.has(kind) && kind !== 'bat' && kind !== 'squid' && id !== ID.GRASS && id !== ID.GRASS_SNOW) continue;
     const shape = def.collision || { y: 0, h: 1 };
     const feetY = y + shape.y + shape.h;
     if (Registry.Physics.canOccupy(simulationWorld, probe, x, feetY, z)) return feetY;
@@ -2492,26 +2963,269 @@ function findMobSpawnY(kind, x, z) {
   return null;
 }
 
-function mobWanderIntent(entity, dt) {
-  entity.aiTimer -= dt;
-  if (entity.aiMode === 'flee') {
-    if (entity.aiTimer > 0) return [entity.dirX, entity.dirZ, 1.45];
-    entity.aiMode = 'idle';
-    entity.aiTimer = 1 + Math.random() * 2;
+function clearMobNavigation(entity, immediate) {
+  entity.navPath = null;
+  entity.navPathIndex = 0;
+  entity.navValidateAt = 0;
+  entity.navBlockedTime = 0;
+  if (immediate) entity.navRepathAt = 0;
+}
+
+function startMobFlee(entity, threatX, threatZ, threatId) {
+  let dx = entity.x - threatX, dz = entity.z - threatZ;
+  const length = Math.hypot(dx, dz);
+  if (length < 0.1) {
+    const angle = Math.random() * Math.PI * 2;
+    dx = Math.cos(angle); dz = Math.sin(angle);
+  } else {
+    dx /= length; dz /= length;
   }
+  const side = (Math.random() - 0.5) * 3;
+  entity.aiMode = 'flee';
+  entity.aiTimer = 2.4 + Math.random() * 0.8;
+  entity.fleeThreatId = threatId || '';
+  entity.fleeTargetX = entity.x + dx * 8 - dz * side;
+  entity.fleeTargetY = entity.y;
+  entity.fleeTargetZ = entity.z + dz * 8 + dx * side;
+  clearMobNavigation(entity, true);
+}
+
+function updateMobFleeGoal(entity, dt) {
+  if (entity.aiMode !== 'flee') return null;
+  entity.aiTimer -= dt;
+  if (entity.aiTimer <= 0 || !Number.isFinite(entity.fleeTargetX + entity.fleeTargetZ)) {
+    entity.aiMode = 'idle';
+    entity.aiTimer = 0.8 + Math.random() * 1.8;
+    entity.fleeThreatId = '';
+    return null;
+  }
+  return {
+    type: 'flee', key: 'flee:' + entity.fleeThreatId,
+    x: entity.fleeTargetX, y: entity.fleeTargetY, z: entity.fleeTargetZ,
+    speed: entity.speed * 1.45, stopDistance: 0.7, maxRange: 12,
+  };
+}
+
+function mobWanderGoal(entity, dt) {
   if (entity.aiMode === 'wander') {
-    if (entity.aiTimer > 0) return [entity.dirX, entity.dirZ, 0.62];
+    entity.aiTimer -= dt;
+    const distance = Math.hypot((entity.wanderTargetX || entity.x) - entity.x,
+      (entity.wanderTargetZ || entity.z) - entity.z);
+    if (entity.aiTimer > 0 && distance > 0.7) {
+      return {
+        type: 'wander', key: 'wander',
+        x: entity.wanderTargetX, y: entity.y, z: entity.wanderTargetZ,
+        speed: entity.speed * 0.62, stopDistance: 0.65, maxRange: 10,
+      };
+    }
     entity.aiMode = 'idle';
     entity.aiTimer = 1.5 + Math.random() * 4;
-  } else if (entity.aiTimer <= 0) {
-    const angle = Math.random() * Math.PI * 2;
-    entity.aiMode = 'wander';
-    entity.aiTimer = 1.5 + Math.random() * 3.5;
-    entity.dirX = Math.cos(angle);
-    entity.dirZ = Math.sin(angle);
-    return [entity.dirX, entity.dirZ, 0.62];
+    clearMobNavigation(entity, true);
+    return null;
   }
-  return [0, 0, 0];
+  entity.aiTimer -= dt;
+  if (entity.aiTimer > 0) return null;
+  const angle = Math.random() * Math.PI * 2;
+  const distance = 4 + Math.random() * 4;
+  entity.aiMode = 'wander';
+  entity.aiTimer = 4 + Math.random() * 3;
+  entity.wanderTargetX = entity.x + Math.cos(angle) * distance;
+  entity.wanderTargetZ = entity.z + Math.sin(angle) * distance;
+  return {
+    type: 'wander', key: 'wander',
+    x: entity.wanderTargetX, y: entity.y, z: entity.wanderTargetZ,
+    speed: entity.speed * 0.62, stopDistance: 0.65, maxRange: 10,
+  };
+}
+
+function selectMobGoal(candidates) {
+  let selected = null;
+  for (const candidate of candidates) {
+    if (!candidate || !Number.isFinite(candidate.x + candidate.y + candidate.z)) continue;
+    if (!selected || MOB_GOAL_PRIORITY[candidate.type] < MOB_GOAL_PRIORITY[selected.type]) selected = candidate;
+  }
+  return selected;
+}
+
+function mobNavigationNodeKey(x, y, z) {
+  return x + ',' + Math.round(y * 10) + ',' + z;
+}
+
+function mobNavigationNodeAt(entity, x, z, fromY) {
+  simulationWorld.ensureChunk(x >> 4, z >> 4);
+  const px = x + 0.5, pz = z + 0.5;
+  const baseY = Math.round(fromY * 10) / 10;
+  for (const offset of MOB_NAV_HEIGHT_OFFSETS) {
+    const y = Math.round((baseY + offset) * 10) / 10;
+    if (y < 1 || y + entity.h >= 255) continue;
+    if (!Registry.Physics.canOccupy(simulationWorld, entity, px, y, pz)) continue;
+    if (Registry.Physics.supportCount(simulationWorld, entity, px, y, pz) < 2) continue;
+    return { x, y, z };
+  }
+  return null;
+}
+
+function mobNavigationNodeValid(entity, node) {
+  if (!node) return false;
+  simulationWorld.ensureChunk(node.x >> 4, node.z >> 4);
+  return Registry.Physics.canOccupy(simulationWorld, entity, node.x + 0.5, node.y, node.z + 0.5) &&
+    Registry.Physics.supportCount(simulationWorld, entity, node.x + 0.5, node.y, node.z + 0.5) >= 2;
+}
+
+function mobNavigationHeapPush(heap, node) {
+  heap.push(node);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = (index - 1) >> 1;
+    if (heap[parent].f < node.f || (heap[parent].f === node.f && heap[parent].order <= node.order)) break;
+    heap[index] = heap[parent];
+    index = parent;
+  }
+  heap[index] = node;
+}
+
+function mobNavigationHeapPop(heap) {
+  if (!heap.length) return null;
+  const root = heap[0];
+  const tail = heap.pop();
+  if (!heap.length) return root;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    if (left >= heap.length) break;
+    const right = left + 1;
+    let child = left;
+    if (right < heap.length && (heap[right].f < heap[left].f ||
+        (heap[right].f === heap[left].f && heap[right].order < heap[left].order))) child = right;
+    if (heap[child].f > tail.f || (heap[child].f === tail.f && heap[child].order >= tail.order)) break;
+    heap[index] = heap[child];
+    index = child;
+  }
+  heap[index] = tail;
+  return root;
+}
+
+function findMobNavigationPath(entity, goal) {
+  if (mobNavigationSearchBudget <= 0 || mobNavigationNodeBudget <= 0) return null;
+  mobNavigationSearchBudget--;
+  const startX = Math.floor(entity.x), startZ = Math.floor(entity.z);
+  const start = mobNavigationNodeAt(entity, startX, startZ, entity.y);
+  if (!start) return null;
+
+  let targetX = Math.floor(goal.x), targetZ = Math.floor(goal.z);
+  const maxRange = Math.max(4, Math.min(28, goal.maxRange || 24));
+  const targetDistance = Math.hypot(targetX - startX, targetZ - startZ);
+  if (targetDistance > maxRange - 1) {
+    targetX = Math.floor(startX + (targetX - startX) / targetDistance * (maxRange - 1));
+    targetZ = Math.floor(startZ + (targetZ - startZ) / targetDistance * (maxRange - 1));
+  }
+  const goalRadius = Math.max(0, Math.floor(goal.stopDistance || 0));
+  const heuristic = node => Math.max(0, Math.abs(node.x - targetX) + Math.abs(node.z - targetZ) - goalRadius) +
+    Math.abs(node.y - goal.y) * 0.25;
+  const open = [];
+  const best = new Map();
+  const closed = new Set();
+  let order = 0;
+  start.g = 0; start.f = heuristic(start); start.parent = null; start.order = order++;
+  best.set(mobNavigationNodeKey(start.x, start.y, start.z), 0);
+  mobNavigationHeapPush(open, start);
+  let expanded = 0;
+
+  while (open.length && expanded < MOB_NAV_NODES_PER_SEARCH && mobNavigationNodeBudget > 0) {
+    const current = mobNavigationHeapPop(open);
+    const currentKey = mobNavigationNodeKey(current.x, current.y, current.z);
+    if (closed.has(currentKey) || current.g !== best.get(currentKey)) continue;
+    closed.add(currentKey);
+    expanded++;
+    mobNavigationNodeBudget--;
+    if (Math.abs(current.x - targetX) + Math.abs(current.z - targetZ) <= goalRadius &&
+        Math.abs(current.y - goal.y) <= 2.1) {
+      const path = [];
+      for (let node = current; node && node.parent; node = node.parent) path.push({ x: node.x, y: node.y, z: node.z });
+      path.reverse();
+      return path;
+    }
+    for (const direction of MOB_NAV_DIRECTIONS) {
+      const nx = current.x + direction[0], nz = current.z + direction[1];
+      if (Math.abs(nx - startX) > maxRange || Math.abs(nz - startZ) > maxRange) continue;
+      const next = mobNavigationNodeAt(entity, nx, nz, current.y);
+      if (!next) continue;
+      const key = mobNavigationNodeKey(next.x, next.y, next.z);
+      if (closed.has(key)) continue;
+      const cost = current.g + 1 + Math.abs(next.y - current.y) * 0.45;
+      if (best.has(key) && best.get(key) <= cost) continue;
+      best.set(key, cost);
+      next.g = cost;
+      next.f = cost + heuristic(next);
+      next.parent = current;
+      next.order = order++;
+      mobNavigationHeapPush(open, next);
+    }
+  }
+  return null;
+}
+
+function mobNavigationIntent(entity, goal) {
+  if (!goal) return [0, 0];
+  const now = Date.now();
+  const goalKey = goal.type + ':' + (goal.key || 'point');
+  if (entity.navGoalKey !== goalKey) {
+    entity.navGoalKey = goalKey;
+    entity.goalType = goal.type;
+    clearMobNavigation(entity, true);
+  }
+
+  const targetMoved = !Number.isFinite(entity.navTargetX + entity.navTargetZ) ||
+    Math.hypot(goal.x - entity.navTargetX, goal.z - entity.navTargetZ) > 1.5;
+  let path = entity.navPath;
+  let index = entity.navPathIndex || 0;
+  while (path && index < path.length) {
+    const node = path[index];
+    if (Math.hypot(node.x + 0.5 - entity.x, node.z + 0.5 - entity.z) > 0.38 || Math.abs(node.y - entity.y) > 1.15) break;
+    index++;
+  }
+  entity.navPathIndex = index;
+
+  const nextNode = path && index < path.length ? path[index] : null;
+  if (nextNode && now >= (entity.navValidateAt || 0)) {
+    entity.navValidateAt = now + 200;
+    if (!mobNavigationNodeValid(entity, nextNode)) {
+      clearMobNavigation(entity, true);
+      path = null;
+      index = 0;
+    }
+  }
+
+  const needsPath = !path || index >= path.length || targetMoved || now >= (entity.navExpiresAt || 0);
+  if (needsPath && now >= (entity.navRepathAt || 0) && mobNavigationSearchBudget > 0) {
+    const replacement = findMobNavigationPath(entity, goal);
+    entity.navRepathAt = now + (replacement ? (goal.type === 'chase' ? 700 : 1200) : 220);
+    if (replacement) {
+      entity.navPath = path = replacement;
+      entity.navPathIndex = index = 0;
+      entity.navTargetX = goal.x; entity.navTargetY = goal.y; entity.navTargetZ = goal.z;
+      entity.navExpiresAt = now + (goal.type === 'chase' || goal.type === 'flee' ? 1500 : 2800);
+    }
+  }
+
+  const distance = Math.hypot(goal.x - entity.x, goal.z - entity.z);
+  if (distance <= (goal.stopDistance || 0.5)) return [0, 0];
+  path = entity.navPath;
+  index = entity.navPathIndex || 0;
+  const waypoint = path && index < path.length ? path[index] : null;
+  let dx = waypoint ? waypoint.x + 0.5 - entity.x : goal.x - entity.x;
+  let dz = waypoint ? waypoint.z + 0.5 - entity.z : goal.z - entity.z;
+  const length = Math.hypot(dx, dz);
+  if (length < 1e-6) return [0, 0];
+  dx /= length; dz /= length;
+
+  if (!waypoint) {
+    const lookAhead = entity.w * 0.5 + 0.55;
+    const safe = mobNavigationNodeAt(entity, Math.floor(entity.x + dx * lookAhead),
+      Math.floor(entity.z + dz * lookAhead), entity.y);
+    if (!safe) return [0, 0];
+  }
+  return [dx, dz];
 }
 
 function turnMob(entity, x, z, dt) {
@@ -2607,9 +3321,14 @@ function moveMobWithPhysics(entity, moveX, moveZ, speed, dt) {
   const expected = Math.hypot(entity.vx, entity.vz) * dt;
   Registry.Physics.move(simulationWorld, entity, dt);
   const moved = Math.hypot(entity.x - oldX, entity.z - oldZ);
-  if (!stepping && length > 1e-6 && wasOnGround && expected > 0.02 && moved < expected * 0.15 && entity.aiMode === 'wander') {
-    entity.aiMode = 'idle';
-    entity.aiTimer = 0.25 + Math.random() * 0.5;
+  if (!stepping && length > 1e-6 && wasOnGround && expected > 0.02 && moved < expected * 0.15) {
+    entity.navBlockedTime = (entity.navBlockedTime || 0) + dt;
+    if (entity.navBlockedTime >= 0.35) {
+      clearMobNavigation(entity, true);
+      entity.navRepathAt = Date.now() + 80;
+    }
+  } else if (moved > 0.01 || length < 1e-6) {
+    entity.navBlockedTime = 0;
   }
 }
 
@@ -2673,19 +3392,27 @@ function tickMobEntity(entity, dt, clock) {
     return;
   }
   if (!Registry.Physics.canOccupy(simulationWorld, entity, entity.x, entity.y, entity.z)) {
-    const correctedY = findMobSpawnY(entity.kind, entity.x, entity.z);
+    const correctedY = findMobSpawnY(entity.kind, entity.x, entity.z, false);
     if (correctedY === null) { entities.delete(entity.id); return; }
     entity.y = correctedY;
     entity.vy = 0;
   }
 
+  let fleeGoal = updateMobFleeGoal(entity, dt);
   if (entity.villageId) {
-    let moveX = 0, moveZ = 0, moveSpeed = 0, handled = false;
+    const villageGoals = [];
+    if (fleeGoal) villageGoals.push(fleeGoal);
+    let handled = false;
     if (entity.kind === 'iron_golem') {
       const threat = nearestHostileMob(entity, 22);
       if (threat) {
         const dx = threat.x - entity.x, dz = threat.z - entity.z, distance = Math.hypot(dx, dz) || 1;
-        moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed * 1.12; handled = true;
+        villageGoals.push({
+          type: 'chase', key: 'golem:' + threat.id, target: threat,
+          x: threat.x, y: threat.y, z: threat.z,
+          speed: entity.speed * 1.12, stopDistance: 1.8, maxRange: 24,
+        });
+        handled = true;
         if (distance < 2.2 && Math.abs(threat.y - entity.y) < 3 && entity.attackCooldown <= 0) {
           entity.attackCooldown = 1.2;
           threat.hp -= 8 + Math.floor(Math.random() * 5);
@@ -2694,13 +3421,26 @@ function tickMobEntity(entity, dt, clock) {
         }
       } else if (entity.meeting) {
         const dx = entity.meeting.x - entity.x, dz = entity.meeting.z - entity.z, distance = Math.hypot(dx, dz) || 1;
-        if (distance > 18) { moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed * 0.85; handled = true; }
+        if (distance > 18) {
+          villageGoals.push({
+            type: 'home', key: 'meeting',
+            x: entity.meeting.x + 0.5, y: entity.meeting.y, z: entity.meeting.z + 0.5,
+            speed: entity.speed * 0.85, stopDistance: 12, maxRange: 26,
+          });
+          handled = true;
+        }
       }
     } else if (entity.kind === 'villager') {
       const threat = nearestHostileMob(entity, 10);
       if (threat) {
-        const dx = entity.x - threat.x, dz = entity.z - threat.z, distance = Math.hypot(dx, dz) || 1;
-        moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed * 1.35;
+        if (entity.aiMode !== 'flee' || entity.fleeThreatId !== threat.id || entity.aiTimer < 0.3) {
+          startMobFlee(entity, threat.x, threat.z, threat.id);
+        }
+        fleeGoal = updateMobFleeGoal(entity, 0);
+        if (fleeGoal) {
+          fleeGoal.speed = entity.speed * 1.35;
+          villageGoals.push(fleeGoal);
+        }
         entity.sleeping = false; handled = true;
       } else {
         const schedule = villagerSchedule(entity);
@@ -2714,17 +3454,33 @@ function tickMobEntity(entity, dt, clock) {
             entity.restockAt = worldTime() + 120;
           }
           if (!entity.sleeping && distance > 0.8) {
-            moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed * 0.82;
+            villageGoals.push({
+              type: 'home', key: schedule.role,
+              x: schedule.point.x + 0.5, y: schedule.point.y, z: schedule.point.z + 0.5,
+              speed: entity.speed * 0.82, stopDistance: 0.75, maxRange: 26,
+            });
           }
           handled = true;
         }
       }
     } else if (entity.kind === 'cat' && entity.meeting) {
       const dx = entity.meeting.x - entity.x, dz = entity.meeting.z - entity.z, distance = Math.hypot(dx, dz) || 1;
-      if (distance > 16) { moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed; handled = true; }
+      if (distance > 16) {
+        villageGoals.push({
+          type: 'home', key: 'meeting',
+          x: entity.meeting.x + 0.5, y: entity.meeting.y, z: entity.meeting.z + 0.5,
+          speed: entity.speed, stopDistance: 10, maxRange: 24,
+        });
+        handled = true;
+      }
     }
     if (handled) {
-      moveMobWithPhysics(entity, moveX, moveZ, moveSpeed, dt);
+      const goal = selectMobGoal(villageGoals);
+      if (goal && goal.type !== 'wander' && entity.aiMode === 'wander') {
+        entity.aiMode = 'idle'; entity.aiTimer = 1 + Math.random() * 2;
+      }
+      const intent = goal ? mobNavigationIntent(entity, goal) : [0, 0];
+      moveMobWithPhysics(entity, intent[0], intent[1], goal ? goal.speed : 0, dt);
       if (entity.y < -16 || !Number.isFinite(entity.x + entity.y + entity.z)) entities.delete(entity.id);
       return;
     }
@@ -2737,6 +3493,10 @@ function tickMobEntity(entity, dt, clock) {
     entity.targetPlayerId = target.id;
     entity.targetMemoryUntil = Date.now() + 4500;
     entity.lastSeenX = target.x; entity.lastSeenY = target.y; entity.lastSeenZ = target.z;
+  } else if (hostileActive && target && Math.hypot(target.x - entity.x, target.z - entity.z) <= 16) {
+    entity.targetPlayerId = target.id;
+    entity.targetMemoryUntil = Date.now() + 1800;
+    entity.lastSeenX = target.x; entity.lastSeenY = target.y; entity.lastSeenZ = target.z;
   } else if (hostileActive && Date.now() < (entity.targetMemoryUntil || 0)) {
     target = {
       x: entity.lastSeenX, y: entity.lastSeenY, z: entity.lastSeenZ,
@@ -2747,13 +3507,38 @@ function tickMobEntity(entity, dt, clock) {
     entity.targetPlayerId = null;
   }
   if (!target && entity.kind === 'wolf' && entity.tamedBy) target = players.get(entity.tamedBy) || null;
-  const temptingTarget = target ? null : nearestTemptingPlayer(entity, 10);
+  const temptingTarget = nearestTemptingPlayer(entity, 10);
+  const goals = [];
+  if (fleeGoal) goals.push(fleeGoal);
   if (target) {
+    goals.push({
+      type: 'chase', key: target.id || entity.targetPlayerId || 'memory', target,
+      x: target.x, y: target.y, z: target.z,
+      speed: entity.speed * (entity.kind === 'wolf' && entity.tamedBy ? 1.15 : 1),
+      stopDistance: entity.kind === 'wolf' && entity.tamedBy ? 3 : 1.2, maxRange: 26,
+    });
+  }
+  if (temptingTarget) {
+    goals.push({
+      type: 'tempt', key: temptingTarget.id, target: temptingTarget,
+      x: temptingTarget.x, y: temptingTarget.y, z: temptingTarget.z,
+      speed: entity.speed * 1.05, stopDistance: 2, maxRange: 12,
+    });
+  }
+  let selectedGoal = selectMobGoal(goals);
+  if (!selectedGoal) selectedGoal = mobWanderGoal(entity, dt);
+  else if (selectedGoal.type !== 'wander' && entity.aiMode === 'wander') {
+    entity.aiMode = 'idle'; entity.aiTimer = 1 + Math.random() * 2;
+  }
+
+  let movementGoal = null;
+  if (selectedGoal && selectedGoal.type === 'chase') {
+    target = selectedGoal.target;
     const dx = target.x - entity.x, dz = target.z - entity.z;
     const distance = Math.hypot(dx, dz) || 1;
     turnMob(entity, dx / distance, dz / distance, dt);
     if (entity.kind === 'wolf' && entity.tamedBy) {
-      if (distance > 3) { moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed * 1.15; }
+      if (distance > 3) movementGoal = selectedGoal;
     } else if (entity.kind === 'creeper' && targetVisible && distance < 3 && Math.abs(target.y - entity.y) < 3) {
       entity.fuse = entity.fuse < 0 ? 1.5 : entity.fuse - dt;
       if (entity.fuse <= 0) {
@@ -2776,27 +3561,22 @@ function tickMobEntity(entity, dt, clock) {
       spawnHostileArrow(entity, target);
     } else if (distance > 1.25) {
       if (entity.kind === 'creeper') entity.fuse = -1;
-      moveX = dx / distance;
-      moveZ = dz / distance;
-      moveSpeed = entity.speed;
+      movementGoal = selectedGoal;
     } else if (targetVisible && entity.attackCooldown <= 0 && Math.abs(target.y - entity.y) < 2) {
       entity.attackCooldown = entity.kind === 'spider' ? 0.8 : 1.0;
       const damage = { zombie: 3, skeleton: 3, spider: 2, creeper: 6, slime: 2, enderman: 7, blaze: 5 }[entity.kind] || 2;
       damagePlayer(target, damage * [0, 0.75, 1, 1.5][world.difficulty], 'mob', entity.kind,
         { x: dx / distance * 7, y: 3.5, z: dz / distance * 7 });
     }
-  } else if (temptingTarget) {
-    const dx = temptingTarget.x - entity.x, dz = temptingTarget.z - entity.z;
-    const distance = Math.hypot(dx, dz) || 1;
-    if (distance > 2.1) {
-      moveX = dx / distance; moveZ = dz / distance; moveSpeed = entity.speed * 1.05;
-    }
-  } else {
+  } else if (selectedGoal && selectedGoal.type === 'tempt') {
+    if (Math.hypot(selectedGoal.x - entity.x, selectedGoal.z - entity.z) > 2.1) movementGoal = selectedGoal;
+  } else if (selectedGoal) {
     if (entity.kind === 'creeper') entity.fuse = -1;
-    const wander = mobWanderIntent(entity, dt);
-    moveX = wander[0]; moveZ = wander[1]; moveSpeed = entity.speed * wander[2];
+    movementGoal = selectedGoal;
   }
 
+  const intent = movementGoal ? mobNavigationIntent(entity, movementGoal) : [0, 0];
+  moveX = intent[0]; moveZ = intent[1]; moveSpeed = movementGoal ? movementGoal.speed : 0;
   moveMobWithPhysics(entity, moveX, moveZ, moveSpeed, dt);
   if (entity.y < -16 || !Number.isFinite(entity.x + entity.y + entity.z)) entities.delete(entity.id);
 }
@@ -2900,6 +3680,8 @@ function landEnderPearl(entity) {
 }
 
 function tickEntities(dt) {
+  mobNavigationSearchBudget = MOB_NAV_SEARCHES_PER_TICK;
+  mobNavigationNodeBudget = MOB_NAV_NODES_PER_TICK;
   updateVillageLifeServer(dt);
   spawnClock += dt;
   const clock = worldClock();
@@ -2915,7 +3697,7 @@ function tickEntities(dt) {
     const hostile = world.difficulty > 0 && (night || dimension !== 'overworld');
     const kinds = hostile ? (dimension === 'nether' ? ['blaze', 'blaze', 'skeleton'] : dimension === 'end' ? ['enderman'] :
       ['zombie', 'skeleton', 'spider', 'creeper', 'slime', 'bat']) :
-      ['pig', 'cow', 'sheep', 'chicken', 'wolf'];
+      ['pig', 'cow', 'sheep', 'chicken', 'rabbit', 'horse', 'wolf'];
     const angle = Math.random() * Math.PI * 2, distance = 10 + Math.random() * 12;
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
     const x = source.x + Math.cos(angle) * distance, z = source.z + Math.sin(angle) * distance;
@@ -3042,8 +3824,12 @@ function tickEntities(dt) {
             { x: direction[0] * 5, y: Math.max(1.2, direction[1] * 3 + 1.8), z: direction[2] * 5 });
         } else {
           targetHit.target.hp -= entity.damage;
+          const ownerPlayer = players.get(entity.owner);
+          if (targetHit.target.hp > 0 && ownerPlayer && PASSIVE_MOBS.has(targetHit.target.kind)) {
+            startMobFlee(targetHit.target, ownerPlayer.x, ownerPlayer.z, ownerPlayer.id);
+          }
           if (targetHit.target.hp > 0) targetHit.target.embeddedArrows = Math.min(4, (targetHit.target.embeddedArrows || 0) + 1);
-          if (targetHit.target.hp <= 0) killMob(targetHit.target, players.get(entity.owner));
+          if (targetHit.target.hp <= 0) killMob(targetHit.target, ownerPlayer);
         }
         entities.delete(entity.id);
         continue;
@@ -3217,13 +4003,19 @@ wss.on('connection', socket => {
         sendJSON(socket, { t: 'error', code: 'banned', message: '你已被此服务器封禁' }); socket.close(1008, 'banned'); return;
       }
       let profile = world.profiles.get(key);
+      const admission = whitelistAdmission(key, requestedName, profile);
+      if (!admission.ok) {
+        sendJSON(socket, { t: 'error', code: admission.code, message: admission.message });
+        socket.close(1008, admission.code); return;
+      }
+      let createdProfile = false;
       if (!profile) {
         profile = defaultProfile(key, requestedName);
-        world.profiles.set(key, profile); scheduleSave();
+        world.profiles.set(key, profile);
+        createdProfile = true;
       }
-      if (WHITELIST.size && !WHITELIST.has(requestedName.toLocaleLowerCase()) && profile.role !== 'admin') {
-        sendJSON(socket, { t: 'error', code: 'whitelist', message: '你不在服务器白名单中' }); socket.close(1008, 'not whitelisted'); return;
-      }
+      if (admission.claim) profile.whitelistName = admission.claim;
+      scheduleSave();
       for (const old of players.values()) if (old.profile.key === key) old.socket.close(4001, 'reconnected');
       const id = crypto.randomUUID().slice(0, 8);
       profile.name = uniqueName(requestedName, id);
@@ -3236,6 +4028,10 @@ wss.on('connection', socket => {
         skin: safeSkin(message.skin), modelType: safeModelType(message.modelType),
         lastSeen: Date.now(), latency: 0, clientLatency: 0,
       };
+      if (createdProfile) {
+        resetPlayerMovementState(player, profile.spawn);
+        profile.spawn = { x: player.x, y: player.y, z: player.z };
+      }
       socket.player = player; players.set(id, player);
       const clock = worldClock();
       sendJSON(socket, {
@@ -3265,6 +4061,8 @@ wss.on('connection', socket => {
     clearTimeout(helloTimer);
     const player = socket.player;
     if (!player) return;
+    if (player.ridingConsumed) addStack(player.profile, { id: Registry.Items.IT.MINECART, n: 1 });
+    player.riding = null; player.ridingConsumed = false;
     player.profile.x = player.x; player.profile.y = player.y; player.profile.z = player.z;
     player.profile.yaw = player.yaw; player.profile.pitch = player.pitch; player.profile.lastSeen = Date.now();
     players.delete(player.id); scheduleSave();
@@ -3297,24 +4095,158 @@ const autosaveTimer = setInterval(() => {
   saveWorldNow();
 }, 30000);
 
+function executeConsoleCommand(line) {
+  const args = parseCommand(line);
+  const command = String(args.shift() || '').replace(/^\//, '').toLocaleLowerCase();
+  const targetOrLog = (name) => {
+    const target = findPlayer(name);
+    if (!target) console.log('Player not found: ' + (canonicalPlayerName(name) ? safeName(name) : '(missing target)'));
+    return target;
+  };
+  if (!command) return true;
+  if (command === 'help' || command === '?') {
+    console.log('Console commands: help, list, status, seed, save, stop, say, grant, deop, perm, gamemode, give, clear, kick, ban, pardon, tp, setspawn, heal, feed, kill, summon, time, weather, difficulty, whitelist');
+    return true;
+  }
+  if (command === 'list') {
+    console.log(Array.from(players.values()).map(player => player.name + '[' + player.profile.role + ']').join(', ') || 'No players online');
+    return true;
+  }
+  if (command === 'status') { console.log(statusLine()); return true; }
+  if (command === 'seed') { console.log('World seed: ' + world.seed); return true; }
+  if (command === 'save' || command === 'save-all') { world.dirty = true; saveWorldNow(); console.log('World saved'); return true; }
+  if (command === 'say') { const text = safeText(args.join(' '), 160); if (text) chatSystem('[Server] ' + text); return true; }
+  if (command === 'grant' || command === 'op') {
+    if (!passwordMatches(args[1])) { console.log('Usage: grant <player> <admin-password>'); return false; }
+    const target = targetOrLog(args[0]);
+    if (!target) return false;
+    target.profile.role = 'admin'; sendProfile(target, 'permission'); scheduleSave(); console.log('Granted admin to ' + target.name); return true;
+  }
+  if (command === 'deop') {
+    const target = targetOrLog(args[0]); if (!target) return false;
+    target.profile.role = 'user'; target.profile.mode = 'survival'; sendProfile(target, 'permission'); scheduleSave();
+    console.log('Removed admin from ' + target.name); return true;
+  }
+  if (command === 'perm') {
+    const target = targetOrLog(args[0]), role = String(args[1] || '').toLocaleLowerCase();
+    if (!target || !ROLE_PERMISSIONS[role]) { console.log('Usage: perm <player> <user|moderator|admin>'); return false; }
+    target.profile.role = role; if (!profileCanCreative(target.profile)) target.profile.mode = 'survival';
+    sendProfile(target, 'permission'); scheduleSave(); console.log(target.name + ' role=' + role); return true;
+  }
+  if (command === 'gamemode' || command === 'gm') {
+    const target = targetOrLog(args[0]);
+    const value = String(args[1] || '').toLocaleLowerCase();
+    const mode = ['1','c','creative'].includes(value) ? 'creative' : ['0','s','survival'].includes(value) ? 'survival' : null;
+    if (!target || !mode) { console.log('Usage: gamemode <player> <survival|creative>'); return false; }
+    setPlayerMode(target, mode); console.log(target.name + ' gamemode=' + mode); return true;
+  }
+  if (command === 'give') {
+    const target = targetOrLog(args.shift()), itemId = resolveItem(args.shift());
+    if (!target || !Number.isInteger(itemId)) { console.log('Usage: give <player> <item> [count]'); return false; }
+    let left = clampInt(args.shift(), 1, 2304, 1), given = 0;
+    while (left > 0) {
+      const amount = Math.min(left, Registry.Items.maxStack(itemId));
+      const overflow = addStack(target.profile, { id:itemId, n:amount });
+      given += amount - overflow; left -= amount - overflow; if (overflow) break;
+    }
+    bumpInventory(target); lockInventory(target); sendProfile(target, 'give'); scheduleSave();
+    console.log('Gave ' + target.name + ' ' + Registry.Items.name(itemId) + ' x' + given); return true;
+  }
+  if (command === 'clear') {
+    const target = targetOrLog(args.shift()); if (!target) return false;
+    const hasItem = args.length > 0, itemId = hasItem ? resolveItem(args.shift()) : undefined;
+    if (hasItem && !Number.isInteger(itemId)) { console.log('Unknown item'); return false; }
+    const amount = args.length ? clampInt(args.shift(), 1, 2304, 1) : Infinity;
+    console.log('Removed ' + clearPlayerItems(target, itemId, amount) + ' items from ' + target.name); return true;
+  }
+  if (command === 'kick') {
+    const target = targetOrLog(args.shift()); if (!target) return false;
+    kickPlayer(target, args.join(' ')); console.log('Kicked ' + target.name); return true;
+  }
+  if (command === 'ban') {
+    if (!args[0]) { console.log('Usage: ban <player> [reason]'); return false; }
+    const name = safeName(args.shift()), target = findPlayer(name);
+    if (target) { world.bans.keys.add(target.profile.key); world.bans.names.add(target.name.toLocaleLowerCase()); kickPlayer(target, args.join(' ') || 'Banned'); }
+    else {
+      world.bans.names.add(name.toLocaleLowerCase());
+      for (const profile of world.profiles.values()) if (profile.name.toLocaleLowerCase() === name.toLocaleLowerCase()) world.bans.keys.add(profile.key);
+    }
+    scheduleSave(); console.log('Banned ' + name); return true;
+  }
+  if (command === 'pardon') {
+    if (!args[0]) { console.log('Usage: pardon <player>'); return false; }
+    const name = safeName(args[0]).toLocaleLowerCase(); world.bans.names.delete(name);
+    for (const profile of world.profiles.values()) if (profile.name.toLocaleLowerCase() === name) world.bans.keys.delete(profile.key);
+    scheduleSave(); console.log('Pardoned ' + name); return true;
+  }
+  if (command === 'tp' || command === 'teleport') {
+    const target = targetOrLog(args.shift()); if (!target) return false;
+    const destinationPlayer = args.length === 1 ? findPlayer(args[0]) : null;
+    const destination = destinationPlayer || (args.length >= 3 ? { x:Number(args[0]), y:Number(args[1]), z:Number(args[2]) } : null);
+    if (!destination || ![destination.x,destination.y,destination.z].every(Number.isFinite)) { console.log('Usage: tp <player> <target|x y z>'); return false; }
+    teleportPlayer(target, destination.x, destination.y, destination.z, 'teleport'); console.log('Teleported ' + target.name); return true;
+  }
+  if (command === 'setspawn') {
+    const target = targetOrLog(args.shift()); if (!target) return false;
+    const pos = args.length >= 3 ? args.slice(0,3).map(Number) : [target.x,target.y,target.z];
+    if (!pos.every(Number.isFinite)) { console.log('Usage: setspawn <player> [x y z]'); return false; }
+    target.profile.spawn = {
+      x:clamp(pos[0],-1000000,1000000), y:clamp(pos[1],-64,320), z:clamp(pos[2],-1000000,1000000),
+    };
+    sendProfile(target, 'spawn'); scheduleSave();
+    console.log('Set spawn for ' + target.name); return true;
+  }
+  if (command === 'heal' || command === 'feed') {
+    const target = targetOrLog(args[0]); if (!target) return false;
+    restorePlayer(target, command === 'heal', command === 'feed'); console.log(command + ': ' + target.name); return true;
+  }
+  if (command === 'kill') {
+    const target = targetOrLog(args[0]); if (!target) return false;
+    killPlayer(target, 'console', 'Server'); console.log('Killed ' + target.name); return true;
+  }
+  if (command === 'summon') {
+    const kind = args.shift(), source = Array.from(players.values())[0];
+    const pos = args.length >= 3 ? args.slice(0,3).map(Number) : source ? [source.x,source.y,source.z] : null;
+    const entity = pos && summonMob(kind, pos[0], pos[1], pos[2]);
+    if (!entity) { console.log('Usage: summon <mob> <x> <y> <z>'); return false; }
+    console.log('Summoned ' + entity.kind + ' id=' + entity.id); return true;
+  }
+  if (command === 'time') {
+    const value = String(args[0] || '').toLocaleLowerCase(), time = value === 'day' ? 0.35 : value === 'night' ? 0.85 : Number(value);
+    if (!Number.isFinite(time)) { console.log('Usage: time <day|night|0..1>'); return false; }
+    setWorldTimeOfDay(time); console.log('Time changed'); return true;
+  }
+  if (command === 'weather') {
+    const weather = args[0] === 'rain' ? 'rain' : args[0] === 'clear' ? 'clear' : null;
+    if (!weather) { console.log('Usage: weather <clear|rain>'); return false; }
+    world.weather = weather; world.weatherTimer = 300; scheduleSave(); console.log('Weather=' + weather); return true;
+  }
+  if (command === 'difficulty') {
+    const names = { peaceful:0, easy:1, normal:2, hard:3 }, difficulty = names[args[0]];
+    if (difficulty === undefined) { console.log('Usage: difficulty <peaceful|easy|normal|hard>'); return false; }
+    world.difficulty = difficulty; scheduleSave(); console.log('Difficulty=' + args[0]); return true;
+  }
+  if (command === 'whitelist') {
+    const action = String(args.shift() || 'list').toLocaleLowerCase();
+    if (action === 'on') whitelistEnabled = true;
+    else if (action === 'off') whitelistEnabled = false;
+    else if (action === 'add' && args[0]) WHITELIST.add(safeName(args[0]).toLocaleLowerCase());
+    else if (action === 'remove' && args[0]) WHITELIST.delete(safeName(args[0]).toLocaleLowerCase());
+    else if (action !== 'list') { console.log('Usage: whitelist <on|off|list|add|remove> [player]'); return false; }
+    world.whitelist.enabled = whitelistEnabled;
+    world.whitelist.names = Array.from(WHITELIST);
+    scheduleSave();
+    console.log('Whitelist ' + (whitelistEnabled ? 'on' : 'off') + ': ' + (Array.from(WHITELIST).join(', ') || '(empty)')); return true;
+  }
+  if (command === 'stop') { console.log('Stopping server...'); shutdown(); return true; }
+  console.log('Unknown command. Type help.');
+  return false;
+}
+
 let consoleInterface = null;
 if (process.stdin.isTTY) {
   consoleInterface = readline.createInterface({ input: process.stdin, output: process.stdout });
-  consoleInterface.on('line', line => {
-    const args = parseCommand(line);
-    const command = String(args.shift() || '').toLocaleLowerCase();
-    if (command === 'grant' && passwordMatches(args[1])) {
-      const target = findPlayer(args[0]);
-      if (!target) console.log('Player not found');
-      else { target.profile.role = 'admin'; sendProfile(target, 'permission'); scheduleSave(); console.log('Granted admin to ' + target.name); }
-    } else if (command === 'list') {
-      console.log(Array.from(players.values()).map(player => player.name + '[' + player.profile.role + ']').join(', ') || 'No players online');
-    } else if (command === 'save') {
-      world.dirty = true; saveWorldNow(); console.log('World saved');
-    } else if (command) {
-      console.log('Console commands: grant <player> <password>, list, save');
-    }
-  });
+  consoleInterface.on('line', executeConsoleCommand);
 }
 
 function shutdown() {
@@ -3340,4 +4272,4 @@ server.listen(PORT, HOST, () => {
   console.log('In game: /auth <password>  |  Server console: grant <player> <password>');
 });
 
-module.exports = { server, wss, world, players, entities, PROTOCOL };
+module.exports = { server, wss, world, players, entities, PROTOCOL, executeConsoleCommand };

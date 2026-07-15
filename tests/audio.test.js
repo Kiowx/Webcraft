@@ -255,6 +255,16 @@ test('gameplay sound preparation decodes silently and reuses the ready variant',
   assert.equal(fetched.filter(url => url.endsWith('mob/pig2.ogg')).length, 0);
 });
 
+test('1.12.2 combat feedback distinguishes weak, strong, sweep and critical attacks', () => {
+  const { Sound } = loadSound();
+  Sound.unlock();
+  const kinds = ['combat.swing', 'combat.strong', 'combat.sweep', 'combat.critical'].map(name => Sound.describe(name));
+  assert.deepEqual(kinds.map(event => event.category), ['player', 'player', 'player', 'player']);
+  assert.deepEqual(kinds.map(event => event.kind), ['swing', 'strong', 'sweep', 'critical']);
+  assert.ok(kinds[2].variants >= 7, 'sweep attacks should keep the original event variation');
+  for (const event of kinds) assert.equal(event.route, 'world');
+});
+
 test('cave ambience requires sustained exposure and uses a long cooldown', () => {
   const { Sound, context } = loadSound();
   Sound.unlock();

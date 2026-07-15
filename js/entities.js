@@ -23,6 +23,8 @@
     cow: Items.IT.WHEAT,
     sheep: Items.IT.WHEAT,
     chicken: Items.IT.WHEAT_SEEDS,
+    rabbit: Items.IT.CARROT,
+    horse: Items.IT.APPLE,
   });
 
   function R() { return rng.next(); }
@@ -81,6 +83,37 @@
       left: prefix + '_left', right: prefix + '_right',
       top: prefix + '_top', bottom: prefix + '_bottom',
     };
+  }
+  const PACKED_FACE_CELLS = Object.freeze({
+    right:[0,0,5,8], left:[5,0,5,8], top:[10,0,6,8],
+    bottom:[0,8,5,8], back:[5,8,5,8], front:[10,8,6,8],
+  });
+  function packedTexture(name, page, cell) {
+    return Object.freeze({ packed:true, name, page, cell:Object.freeze(cell.slice()) });
+  }
+  function packedFaceTex(prefix, page) {
+    const tex = {};
+    for (const face of ['front', 'back', 'left', 'right', 'top', 'bottom']) {
+      tex[face] = packedTexture(prefix + '_' + face, page, PACKED_FACE_CELLS[face]);
+    }
+    return Object.freeze(tex);
+  }
+  function packedAllTex(name, page, face) {
+    const ref = packedTexture(name, page, PACKED_FACE_CELLS[face || 'front']);
+    return { front:ref, back:ref, left:ref, right:ref, top:ref, bottom:ref };
+  }
+  function textureUv(texture) {
+    if (!texture || !texture.packed) return Textures.uv(texture);
+    const page = Textures.rect(texture.page);
+    const cell = texture.cell;
+    const size = Textures.atlas && Textures.atlas.size ? Textures.atlas.size : 512;
+    const inset = 0.04;
+    return [
+      (page[0] + cell[0] + inset) / size,
+      (page[1] + cell[1] + inset) / size,
+      (page[0] + cell[0] + cell[2] - inset) / size,
+      (page[1] + cell[1] + cell[3] - inset) / size,
+    ];
   }
 
   function villagerModel(robeTexture, professionHat) {
@@ -296,6 +329,34 @@
         { s: [2, 2, 10], c: [0, 9, 10], anim: 'tail', pivot: [0, 9, 6], tex: faceTex('cat_tail') },
       ],
     },
+    rabbit: {
+      w: 0.42, h: 0.52, hp: 3, speed: 1.8, headPivot: [0, 7, -4], sound: null,
+      drops: [], parts: [
+        { s:[6,5,8], c:[0,5,1], anim:'body', tex:allTex('rabbit') },
+        { s:[5,5,5], c:[0,7,-4], anim:'head', tex:boxTex('rabbit_face', 'rabbit') },
+        { s:[2,6,2], c:[-1.5,12,-3], anim:'head', detail:true, tex:allTex('rabbit') },
+        { s:[2,6,2], c:[1.5,12,-3], anim:'head', detail:true, tex:allTex('rabbit') },
+        { s:[2,3,4], c:[-2,1.5,3], anim:'leg0', tex:allTex('rabbit') },
+        { s:[2,3,4], c:[2,1.5,3], anim:'leg1', tex:allTex('rabbit') },
+        { s:[3,3,3], c:[0,5,6], anim:'tail', detail:true, tex:allTex('rabbit_tail') },
+      ],
+    },
+    horse: {
+      w: 1.4, h: 1.6, hp: 30, speed: 2.25, headPivot: [0, 21, -10], sound: null,
+      drops: [{ id: () => Items.IT.LEATHER, n: [0, 2] }], parts: [
+        { s:[10,10,18], c:[0,15,1], anim:'body', tex:allTex('horse') },
+        { s:[6,10,6], c:[0,20,-8], anim:'head', rot:[-0.35,0,0], tex:allTex('horse') },
+        { s:[6,5,8], c:[0,21,-13], anim:'head', tex:boxTex('horse_face', 'horse') },
+        { s:[2,5,1], c:[-2,26,-10], anim:'head', detail:true, tex:allTex('horse') },
+        { s:[2,5,1], c:[2,26,-10], anim:'head', detail:true, tex:allTex('horse') },
+        { s:[4,12,4], c:[-3,6,-5], anim:'leg0', tex:allTex('horse') },
+        { s:[4,12,4], c:[3,6,-5], anim:'leg1', tex:allTex('horse') },
+        { s:[4,12,4], c:[-3,6,7], anim:'leg1', tex:allTex('horse') },
+        { s:[4,12,4], c:[3,6,7], anim:'leg0', tex:allTex('horse') },
+        { s:[2,8,4], c:[0,13,12], anim:'tail', pivot:[0,16,9], detail:true, tex:allTex('horse_tail') },
+        { s:[1,8,10], c:[0,22,-3], detail:true, tex:allTex('horse_mane') },
+      ],
+    },
     iron_golem: {
       w: 1.35, h: 2.7, hp: 100, speed: 1.15, headPivot: [0, 39, -2], sound: null,
       drops: [{ id: () => Items.IT.IRON_INGOT, n: [3, 5] }, { id: () => Blocks.ID.FLOWER_RED, n: [0, 1] }], parts: [
@@ -365,8 +426,167 @@
   };
 
   const QUARTER_TURN_X = [Math.PI / 2, 0, 0];
+  const HORSE_NECK_ROT = [-Math.PI / 6, 0, 0];
+  const HORSE_TAIL_BASE_ROT = [1.134464, 0, 0];
+  const HORSE_TAIL_TIP_ROT = [1.40215, 0, 0];
   const originalVariant = (kind, config) => Object.assign({}, MODELS[kind], config);
+
+  function originalBlazeModel() {
+    const parts = [
+      { s:[8,8,8], c:[0,22,0], anim:'head', tex:packedFaceTex('blaze_original_head', 'blaze') },
+    ];
+    const rings = [
+      { first:0, count:4, radius:9, y:20, speed:-Math.PI * 0.1, phase:0, ySpeed:0.25, yPhase:0, yStep:0.5 },
+      { first:4, count:4, radius:7, y:16, speed:Math.PI * 0.03, phase:Math.PI / 4, ySpeed:0.25, yPhase:2, yStep:0.5 },
+      { first:8, count:4, radius:5, y:7, speed:-Math.PI * 0.05, phase:0.47123894, ySpeed:0.5, yPhase:6, yStep:0.75 },
+    ];
+    for (const ring of rings) for (let i = 0; i < ring.count; i++) {
+      parts.push({
+        s:[2,8,2], c:[0,ring.y,0], tex:packedFaceTex('blaze_original_rod', 'blaze_rod_mob'),
+        orbit:{
+          r:ring.radius, y:ring.y, s:ring.speed, p:ring.phase + i,
+          xOffset:1, zOffset:1, yAmp:-1, ySpeed:ring.ySpeed,
+          yPhase:ring.yPhase + i * ring.yStep,
+        },
+      });
+    }
+    return originalVariant('blaze', { headPivot:[0,22,0], parts });
+  }
+
+  function originalDragonModel() {
+    const parts = [
+      { s:[24,24,64], c:[0,24,8], anim:'body', tex:packedFaceTex('dragon_original_body', 'dragon_body') },
+      { s:[2,6,12], c:[0,39,-2], anim:'body', detail:true, tex:packedFaceTex('dragon_original_body_scale', 'dragon_face') },
+      { s:[2,6,12], c:[0,39,18], anim:'body', detail:true, tex:packedFaceTex('dragon_original_body_scale', 'dragon_face') },
+      { s:[2,6,12], c:[0,39,38], anim:'body', detail:true, tex:packedFaceTex('dragon_original_body_scale', 'dragon_face') },
+    ];
+
+    for (let i = 0; i < 5; i++) {
+      const y = 29 + i;
+      const z = -20 - i * 10;
+      parts.push(
+        { s:[10,10,10], c:[0,y,z], tex:packedFaceTex('dragon_original_spine', 'dragon_wing') },
+        { s:[2,4,6], c:[0,y + 7,z], detail:true, tex:packedFaceTex('dragon_original_spine_scale', 'blaze_face') }
+      );
+    }
+
+    parts.push(
+      { s:[16,16,16], c:[0,34,-64], anim:'head', tex:packedFaceTex('dragon_original_upper_head', 'cow_udder') },
+      { s:[16.25,16.25,16.25], c:[0,34,-64], anim:'head', detail:true, tex:packedFaceTex('dragon_original_eyes', 'chicken_beak') },
+      { s:[12,5,16], c:[0,30.5,-78], anim:'head', tex:packedFaceTex('dragon_original_upper_lip', 'cow_tail') },
+      { s:[12,4,16], c:[0,25.5,-78], anim:'head', tex:packedFaceTex('dragon_original_jaw', 'sheep_wool_cap') },
+      { s:[2,4,6], c:[-4,45,-63], anim:'head', mirror:true, detail:true, tex:packedFaceTex('dragon_original_head_scale', 'sheep_ear') },
+      { s:[2,4,6], c:[4,45,-63], anim:'head', detail:true, tex:packedFaceTex('dragon_original_head_scale', 'sheep_ear') },
+      { s:[2,2,4], c:[-4,31,-84], anim:'head', mirror:true, detail:true, tex:packedFaceTex('dragon_original_nostril', 'sheep_tail') },
+      { s:[2,2,4], c:[4,31,-84], anim:'head', detail:true, tex:packedFaceTex('dragon_original_nostril', 'sheep_tail') }
+    );
+
+    for (const side of [-1, 1]) {
+      const wingAnim = side < 0 ? 'wing0' : 'wing1';
+      parts.push(
+        { s:[56,8,8], c:[side * 40,31,2], anim:wingAnim, joint:[side * -28,0,0], mirror:side > 0, tex:packedFaceTex('dragon_original_wing_bone', 'chicken_wattle') },
+        { s:[56,0,56], c:[side * 40,31,32], anim:wingAnim, joint:[side * -28,0,0], mirror:side > 0, detail:true, tex:packedAllTex('dragon_original_wing_skin', 'chicken_leg') },
+        { s:[56,4,4], c:[side * 96,31,2], anim:wingAnim, joint:[side * -28,0,0], mirror:side > 0, tex:packedFaceTex('dragon_original_wing_tip_bone', 'wolf') },
+        { s:[56,0,56], c:[side * 96,31,32], anim:wingAnim, joint:[side * -28,0,0], mirror:side > 0, detail:true, tex:packedAllTex('dragon_original_wing_tip_skin', 'wolf_face') },
+
+        { s:[8,24,8], c:[side * 12,19,-4], rot:[1.3,0,0], tex:packedFaceTex('dragon_original_front_leg', 'cat_face') },
+        { s:[6,24,6], c:[side * 12,9,-12], rot:[-0.5,0,0], tex:packedFaceTex('dragon_original_front_leg_tip', 'horse') },
+        { s:[8,4,16], c:[side * 12,2,-21], rot:[0.75,0,0], tex:packedFaceTex('dragon_original_front_foot', 'horse_face') },
+        { s:[16,32,16], c:[side * 16,21,25], rot:[1,0,0], tex:packedFaceTex('dragon_original_rear_leg', 'horse_tail') },
+        { s:[12,32,12], c:[side * 16,10,39], rot:[0.5,0,0], tex:packedFaceTex('dragon_original_rear_leg_tip', 'horse_mane') },
+        { s:[18,6,24], c:[side * 16,3,51], rot:[0.75,0,0], tex:packedFaceTex('dragon_original_rear_foot', 'zombie_face') }
+      );
+    }
+
+    for (let i = 0; i < 12; i++) {
+      const y = 23 - Math.sin(i * 0.45) * 2;
+      const z = 49 + i * 10;
+      parts.push(
+        { s:[10,10,10], c:[0,y,z], anim:'tail', pivot:[0,23,40], tex:packedFaceTex('dragon_original_spine', 'dragon_wing') },
+        { s:[2,4,6], c:[0,y + 7,z], anim:'tail', pivot:[0,23,40], detail:true, tex:packedFaceTex('dragon_original_spine_scale', 'blaze_face') }
+      );
+    }
+    return originalVariant('ender_dragon', { headPivot:[0,34,-64], parts });
+  }
+
+  function originalSpiderLeg(side, pair, z, yaw, roll) {
+    return {
+      s:[16,2,2], c:[side * 11,9,z], anim:'spiderLeg',
+      spiderLeg:{ side, pair, pivot:[side * 4,9,z], yaw, roll },
+      tex:packedFaceTex('spider_original_leg', 'creeper_charge'),
+    };
+  }
+
   const ORIGINAL_MODELS = Object.freeze(Object.assign({}, MODELS, {
+    zombie: originalVariant('zombie', {
+      headPivot:[0,28,0], parts: [
+        { s:[8,12,4], c:[0,18,0], tex:faceTex('zombie_body') },
+        { s:[8,8,8], c:[0,28,0], anim:'head', tex:faceTex('zombie_head') },
+        { s:[4,12,4], c:[-1.9,6,0], anim:'leg0', joint:[0,6,0], tex:faceTex('zombie_leg') },
+        { s:[4,12,4], c:[1.9,6,0], anim:'leg1', joint:[0,6,0], mirror:true, tex:faceTex('zombie_leg') },
+        { s:[4,12,4], c:[-6,18,0], anim:'armF0', joint:[1,4,0], tex:faceTex('zombie_arm') },
+        { s:[4,12,4], c:[6,18,0], anim:'armF1', joint:[-1,4,0], mirror:true, tex:faceTex('zombie_arm') },
+      ],
+    }),
+    skeleton: originalVariant('skeleton', {
+      headPivot:[0,28,0], parts: [
+        { s:[8,12,4], c:[0,18,0], tex:faceTex('skeleton_body') },
+        { s:[8,8,8], c:[0,28,0], anim:'head', tex:faceTex('skeleton_head') },
+        { s:[2,12,2], c:[-2,6,0], anim:'leg0', joint:[0,6,0], tex:faceTex('skeleton_limb') },
+        { s:[2,12,2], c:[2,6,0], anim:'leg1', joint:[0,6,0], mirror:true, tex:faceTex('skeleton_limb') },
+        { s:[2,12,2], c:[-5,18,0], anim:'armF0', joint:[0,4,0], tex:faceTex('skeleton_limb') },
+        { s:[2,12,2], c:[5,18,0], anim:'armF1', joint:[0,4,0], mirror:true, tex:faceTex('skeleton_limb') },
+      ],
+    }),
+    creeper: originalVariant('creeper', {
+      headPivot:[0,22,0], parts: [
+        { s:[8,12,4], c:[0,12,0], anim:'body', tex:faceTex('creeper_body') },
+        { s:[8,8,8], c:[0,22,0], anim:'head', tex:faceTex('creeper_head') },
+        { s:[4,6,4], c:[-2,3,4], anim:'leg0', joint:[0,3,0], tex:faceTex('creeper_leg') },
+        { s:[4,6,4], c:[2,3,4], anim:'leg1', joint:[0,3,0], tex:faceTex('creeper_leg') },
+        { s:[4,6,4], c:[-2,3,-4], anim:'leg1', joint:[0,3,0], tex:faceTex('creeper_leg') },
+        { s:[4,6,4], c:[2,3,-4], anim:'leg0', joint:[0,3,0], tex:faceTex('creeper_leg') },
+      ],
+    }),
+    spider: originalVariant('spider', {
+      headPivot:[0,9,-7], parts: [
+        { s:[8,8,8], c:[0,9,-7], anim:'head', tex:packedFaceTex('spider_original_head', 'spider_head') },
+        { s:[6,6,6], c:[0,9,0], anim:'body', tex:packedFaceTex('spider_original_neck', 'spider_body') },
+        { s:[10,8,12], c:[0,9,9], anim:'body', tex:packedFaceTex('spider_original_body', 'spider_leg') },
+        originalSpiderLeg(-1,0,2,Math.PI / 4,-Math.PI / 4),
+        originalSpiderLeg(1,0,2,-Math.PI / 4,Math.PI / 4),
+        originalSpiderLeg(-1,1,1,Math.PI / 8,-0.58119464),
+        originalSpiderLeg(1,1,1,-Math.PI / 8,0.58119464),
+        originalSpiderLeg(-1,2,0,-Math.PI / 8,-0.58119464),
+        originalSpiderLeg(1,2,0,Math.PI / 8,0.58119464),
+        originalSpiderLeg(-1,3,-1,-Math.PI / 4,-Math.PI / 4),
+        originalSpiderLeg(1,3,-1,Math.PI / 4,Math.PI / 4),
+        { s:[8.04,8.04,8.04], c:[0,9,-7], anim:'head', detail:true, tex:packedFaceTex('spider_original_eyes', 'skeleton') },
+      ],
+    }),
+    slime: originalVariant('slime', {
+      headPivot:[0,4,0], parts: [
+        { s:[8,8,8], c:[0,4,0], anim:'body', layer:true, detail:true, tex:packedFaceTex('slime_original_outer', 'slime') },
+        { s:[6,6,6], c:[0,4,0], anim:'body', tex:packedFaceTex('slime_original_inner', 'slime_core') },
+        { s:[2,2,2], c:[-2.25,5,-2.5], tex:packedFaceTex('slime_original_right_eye', 'slime_eye') },
+        { s:[2,2,2], c:[2.25,5,-2.5], tex:packedFaceTex('slime_original_left_eye', 'slime_mouth') },
+        { s:[1,1,1], c:[0.5,2.5,-3], detail:true, tex:packedFaceTex('slime_original_mouth', 'pig_ear') },
+      ],
+    }),
+    enderman: originalVariant('enderman', {
+      headPivot:[0,42,0], parts: [
+        { s:[8,12,4], c:[0,33,0], anim:'body', tex:packedFaceTex('enderman_original_body', 'pig_tail') },
+        { s:[8,8,8], c:[0,42,0], anim:'head', tex:packedFaceTex('enderman_original_head', 'enderman') },
+        { s:[2,30,2], c:[-2,15,0], anim:'leg0', joint:[0,15,0], tex:packedFaceTex('enderman_original_limb', 'cow_ear') },
+        { s:[2,30,2], c:[2,15,0], anim:'leg1', joint:[0,15,0], mirror:true, tex:packedFaceTex('enderman_original_limb', 'cow_ear') },
+        { s:[2,30,2], c:[-3,24,0], anim:'armF0', joint:[0,13,0], tex:packedFaceTex('enderman_original_limb', 'cow_ear') },
+        { s:[2,30,2], c:[5,24,0], anim:'armF1', joint:[0,13,0], mirror:true, tex:packedFaceTex('enderman_original_limb', 'cow_ear') },
+        { s:[7,7,7], c:[0,42,0], anim:'head', layer:true, detail:true, tex:packedFaceTex('enderman_original_headwear', 'enderman_face') },
+        { s:[8.04,8.04,8.04], c:[0,42,0], anim:'head', detail:true, tex:packedFaceTex('enderman_original_eyes', 'cow_horn') },
+      ],
+    }),
+    blaze: originalBlazeModel(),
+    ender_dragon: originalDragonModel(),
     pig: originalVariant('pig', {
       headPivot: [0,12,-6],
       parts: [
@@ -455,6 +675,38 @@
         { s:[1,8,1], c:[0,16,9], anim:'tail', pivot:[0,12,8], rot:[-0.55,0,0], tex:faceTex('cat_tail') },
       ],
     }),
+    horse: originalVariant('horse', {
+      headPivot: [0,20,-10],
+      parts: [
+        { s:[10,10,24], c:[0,16,2], anim:'body', tex:faceTex('horse_original_body') },
+
+        { s:[4,9,5], c:[3.5,12.5,11], anim:'leg0', joint:[0,2.5,0], tex:faceTex('horse_original_leg') },
+        { s:[3,5,3], c:[3.5,5.5,11], anim:'leg0', joint:[0,9.5,0], tex:faceTex('horse_original_shin') },
+        { s:[4,3,4], c:[3.5,1.4,11], anim:'leg0', joint:[0,13.6,0], tex:faceTex('horse_original_hoof') },
+        { s:[4,9,5], c:[-3.5,12.5,11], anim:'leg1', joint:[0,2.5,0], tex:faceTex('horse_original_leg') },
+        { s:[3,5,3], c:[-3.5,5.5,11], anim:'leg1', joint:[0,9.5,0], tex:faceTex('horse_original_shin') },
+        { s:[4,3,4], c:[-3.5,1.4,11], anim:'leg1', joint:[0,13.6,0], tex:faceTex('horse_original_hoof') },
+
+        { s:[3,8,4], c:[3.6,12,-8.1], anim:'leg1', joint:[0,3,0.1], tex:faceTex('horse_original_leg') },
+        { s:[3,5,3], c:[3.6,5.5,-8.1], anim:'leg1', joint:[0,9.5,0.1], tex:faceTex('horse_original_shin') },
+        { s:[4,3,4], c:[3.6,1.4,-8.1], anim:'leg1', joint:[0,13.6,0.1], tex:faceTex('horse_original_hoof') },
+        { s:[3,8,4], c:[-3.6,12,-8.1], anim:'leg0', joint:[0,3,0.1], tex:faceTex('horse_original_leg') },
+        { s:[3,5,3], c:[-3.6,5.5,-8.1], anim:'leg0', joint:[0,9.5,0.1], tex:faceTex('horse_original_shin') },
+        { s:[4,3,4], c:[-3.6,1.4,-8.1], anim:'leg0', joint:[0,13.6,0.1], tex:faceTex('horse_original_hoof') },
+
+        { s:[4,14,8], c:[-0.05,23.425,-9.668], anim:'head', rot:HORSE_NECK_ROT, tex:faceTex('horse_original_neck') },
+        { s:[2,16,4], c:[0,26.531,-5.688], anim:'head', rot:HORSE_NECK_ROT, tex:faceTex('horse_original_mane') },
+        { s:[5,5,7], c:[0,27.495,-12.018], anim:'head', rot:HORSE_NECK_ROT, tex:faceTex('horse_original_head') },
+        { s:[4,3,6], c:[0,25.411,-17.714], anim:'head', rot:HORSE_NECK_ROT, tex:faceTex('horse_original_upper_mouth') },
+        { s:[4,2,5], c:[0,23.196,-16.464], anim:'head', rot:HORSE_NECK_ROT, tex:faceTex('horse_original_lower_mouth') },
+        { s:[2,3,1], c:[1.45,31.343,-11.353], anim:'head', rot:HORSE_NECK_ROT, wiggle:'ear0', tex:faceTex('horse_original_ear') },
+        { s:[2,3,1], c:[-1.45,31.343,-11.353], anim:'head', rot:HORSE_NECK_ROT, wiggle:'ear1', tex:faceTex('horse_original_ear') },
+
+        { s:[2,2,3], c:[0,19.641,14.634], anim:'tail', pivot:[0,21,14], rot:HORSE_TAIL_BASE_ROT, tex:faceTex('horse_original_tail') },
+        { s:[3,4,7], c:[0,15.109,16.747], anim:'tail', pivot:[0,21,14], rot:HORSE_TAIL_BASE_ROT, tex:faceTex('horse_original_tail') },
+        { s:[3,4,7], c:[0,9.093,18.553], anim:'tail', pivot:[0,21,14], rot:HORSE_TAIL_TIP_ROT, tex:faceTex('horse_original_tail') },
+      ],
+    }),
     squid: originalVariant('squid', {
       parts: [
         { s:[12,16,12], c:[0,10,0], anim:'body', tex:allTex('squid') },
@@ -475,41 +727,6 @@
         { s:[6,6,6], c:[0,8,-2], anim:'head', tex:boxTex('bat_face', 'bat') },
         { s:[10,1,6], c:[-6.5,6,0], anim:'wing0', tex:allTex('bat_wing') },
         { s:[10,1,6], c:[6.5,6,0], anim:'wing1', tex:allTex('bat_wing') },
-      ],
-    }),
-    spider: originalVariant('spider', {
-      headPivot: [0,7,-7],
-      parts: [
-        { s:[8,8,8], c:[0,7,-7], anim:'head', tex:allTex('spider_head') },
-        { s:[6,6,6], c:[0,6,-1], anim:'body', tex:allTex('spider_body') },
-        { s:[10,8,12], c:[0,6,6], anim:'body', tex:allTex('spider_body') },
-        { s:[16,2,2], c:[-9,5,-5], anim:'leg0', rot:[0,-0.48,-0.08], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[9,5,-5], anim:'leg1', rot:[0,0.48,0.08], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[-9,4.5,-2], anim:'leg1', rot:[0,-0.18,-0.04], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[9,4.5,-2], anim:'leg0', rot:[0,0.18,0.04], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[-9,4.5,2], anim:'leg0', rot:[0,0.18,-0.04], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[9,4.5,2], anim:'leg1', rot:[0,-0.18,0.04], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[-9,4,5], anim:'leg1', rot:[0,0.48,-0.08], tex:allTex('spider_leg') },
-        { s:[16,2,2], c:[9,4,5], anim:'leg0', rot:[0,-0.48,0.08], tex:allTex('spider_leg') },
-      ],
-    }),
-    slime: originalVariant('slime', {
-      parts: [
-        { s:[9,9,9], c:[0,4.5,0], anim:'body', tex:allTex('slime') },
-        { s:[8,8,8], c:[0,4.5,0], anim:'body', detail:true, tex:allTex('slime_core') },
-        { s:[2,2,2], c:[-2.5,6,-4.5], tex:allTex('slime_eye') },
-        { s:[2,2,2], c:[2.5,6,-4.5], tex:allTex('slime_eye') },
-        { s:[1,1,1], c:[0,3.5,-4.75], detail:true, tex:allTex('slime_mouth') },
-      ],
-    }),
-    enderman: originalVariant('enderman', {
-      parts: [
-        { s:[8,12,4], c:[0,32,0], anim:'body', tex:allTex('enderman') },
-        { s:[8,8,8], c:[0,42,0], anim:'head', tex:boxTex('enderman_face', 'enderman') },
-        { s:[2,30,2], c:[-2,15,0], anim:'leg0', tex:allTex('enderman') },
-        { s:[2,30,2], c:[2,15,0], anim:'leg1', tex:allTex('enderman') },
-        { s:[2,30,2], c:[-5,27,0], anim:'armF0', tex:allTex('enderman') },
-        { s:[2,30,2], c:[5,27,0], anim:'armF1', tex:allTex('enderman') },
       ],
     }),
     villager: originalVillagerModel('unemployed'),
@@ -607,6 +824,16 @@
     const models = activeModelProfile === 'original' ? ORIGINAL_REMOTE_PLAYER_MODELS : REMOTE_PLAYER_MODELS;
     return models.get(skin + ':' + modelType);
   }
+  const MINECART_MODEL = Object.freeze({
+    w: 20 / 16, h: 11 / 16, parts: Object.freeze([
+      { s:[20,2,16], c:[0,2,0], tex:allTex('minecart') },
+      { s:[2,8,16], c:[-9,7,0], tex:allTex('minecart') },
+      { s:[2,8,16], c:[9,7,0], tex:allTex('minecart') },
+      { s:[16,8,2], c:[0,7,-7], tex:allTex('minecart') },
+      { s:[16,8,2], c:[0,7,7], tex:allTex('minecart') },
+    ]),
+  });
+  const MINECART_RIDER_Y_OFFSET = 3 / 16;
 
   function setModelProfile(profile) {
     const next = profile === 'original' || profile === 'original_1_12' ? 'original' : 'default';
@@ -1713,8 +1940,9 @@
         if (ground !== Blocks.ID.GRASS && ground !== Blocks.ID.GRASS_SNOW) return;
         if (light < 8) return;
         const biome = world.biomeAt(x, z);
-        const kinds = biome === 'forest' ? ['pig', 'cow', 'sheep', 'chicken', 'wolf'] :
-          ['pig', 'cow', 'sheep', 'chicken'];
+        const kinds = biome === 'forest' || biome === 'birch_forest' ? ['pig', 'cow', 'sheep', 'chicken', 'wolf', 'rabbit'] :
+          biome === 'plains' ? ['pig', 'cow', 'sheep', 'chicken', 'horse', 'rabbit'] :
+          ['pig', 'cow', 'sheep', 'chicken', 'rabbit'];
         spawnMob(kinds[Math.floor(R() * kinds.length)], x + 0.5, spawnY, z + 0.5);
       }
     };
@@ -1959,7 +2187,7 @@
     { c: [2, 6, 7, 3], tile: 'tnt_top' }, { c: [0, 1, 5, 4], tile: 'tnt_bottom' },
     { c: [4, 5, 7, 6], tile: 'tnt_side' }, { c: [1, 0, 2, 3], tile: 'tnt_side' },
   ];
-  const PART_CACHE = new WeakMap();
+  let PART_CACHE = new WeakMap();
   const ENTITY_PHASE_CACHE = new WeakMap();
   const ITEM_SPRITE_CACHE = new Map();
   let shadowUV = null;
@@ -2111,11 +2339,13 @@
       corners.push([x, y, z]);
     }
     const faces = ENTITY_BOX_FACES.map((face) => {
-      const uv = Textures.uv(part.tex[face.key]);
+      const uv = textureUv(part.tex[face.key]);
+      const u0 = part.mirror ? uv[2] : uv[0];
+      const u1 = part.mirror ? uv[0] : uv[2];
       return {
         c: face.c,
         shade: face.shade,
-        uv: [[uv[0], uv[3]], [uv[2], uv[3]], [uv[2], uv[1]], [uv[0], uv[1]]],
+        uv: [[u0, uv[3]], [u1, uv[3]], [u1, uv[1]], [u0, uv[1]]],
       };
     });
     cached = { sw, sh, sl, corners, faces };
@@ -2148,6 +2378,7 @@
     for (const model of Object.values(ORIGINAL_VILLAGER_MODELS)) warmModel(model);
     for (const model of REMOTE_PLAYER_MODELS.values()) warmModel(model);
     for (const model of ORIGINAL_REMOTE_PLAYER_MODELS.values()) warmModel(model);
+    warmModel(MINECART_MODEL);
     for (const material of ['leather', 'gold', 'iron', 'diamond']) {
       for (const modelType of ['classic', 'slim']) for (let slot = 0; slot < 4; slot++) {
         for (const part of remoteArmorParts(slot, material, modelType, true)) {
@@ -2183,7 +2414,9 @@
     const movementScale = e.sneaking ? 0.45 : e.sprinting ? 1.18 : 1;
     let swing = Math.sin(phase + sidePhase) * Math.min(0.92, (e.animSpeed || 0) * 0.42) * movementScale;
     const guard = U.clamp(e.blockBlend === undefined ? (e.blocking ? 1 : 0) : e.blockBlend, 0, 1);
-    swing = U.lerp(swing, right ? 1.15 : 0.10, guard);
+    const offhandItem = e.offhand ? Items.get(e.offhand) : null;
+    const guardRight = !(offhandItem && offhandItem.shield);
+    swing = U.lerp(swing, right === guardRight ? 1.15 : 0.10, guard);
     const action = e.action || 'idle';
     const actionPhase = U.clamp(e.actionPhase || 0, 0, 1);
     if (action === 'eat' && right) swing = U.lerp(swing, 1.48 + Math.sin(actionPhase * Math.PI * 8) * 0.12, 0.92);
@@ -2211,6 +2444,7 @@
     const isArm = part.anim === 'armF0' || part.anim === 'armF1';
     const isPlayerArm = part.anim === 'arm0' || part.anim === 'arm1';
     const isGolemArm = part.anim === 'golemArm0' || part.anim === 'golemArm1';
+    const isSpiderLeg = part.anim === 'spiderLeg' && part.spiderLeg;
     const isWing = part.anim === 'wing0' || part.anim === 'wing1';
     const isTentacle = typeof part.anim === 'string' && part.anim.indexOf('tentacle') === 0;
     const isPlayer = e.kind === 'player';
@@ -2251,9 +2485,14 @@
     let cx = part.c[0] / 16, cy = part.c[1] / 16, cz = part.c[2] / 16;
     if (part.orbit) {
       const angle = poseAge * part.orbit.s + part.orbit.p;
-      cx = Math.cos(angle) * part.orbit.r / 16;
-      cz = Math.sin(angle) * part.orbit.r / 16;
-      cy = (part.orbit.y + Math.sin(angle * 1.7) * 1.4) / 16;
+      cx = (Math.cos(angle) * part.orbit.r + (part.orbit.xOffset || 0)) / 16;
+      cz = (Math.sin(angle) * part.orbit.r + (part.orbit.zOffset || 0)) / 16;
+      if (Number.isFinite(part.orbit.ySpeed)) {
+        cy = (part.orbit.y + Math.cos(poseAge * part.orbit.ySpeed + (part.orbit.yPhase || 0)) *
+          (part.orbit.yAmp || 0)) / 16;
+      } else {
+        cy = (part.orbit.y + Math.sin(angle * 1.7) * 1.4) / 16;
+      }
     }
     const bobScale = e.kind === 'cow' ? 0.012 : e.kind === 'pig' ? 0.022 : 0.018;
     const bob = e.onGround ? Math.abs(Math.sin(animPhase)) * Math.min(0.035, speed * bobScale) : 0;
@@ -2274,6 +2513,30 @@
       let lx = geom.corners[i][0];
       let ly = geom.corners[i][1];
       let lz = geom.corners[i][2];
+      let positionApplied = false;
+      if (isSpiderLeg) {
+        const leg = part.spiderLeg;
+        const pivotX = leg.pivot[0] / 16, pivotY = leg.pivot[1] / 16, pivotZ = leg.pivot[2] / 16;
+        let px = lx + cx - pivotX, py = ly + cy - pivotY, pz = lz + cz - pivotZ;
+        const pairPhase = [0, Math.PI, Math.PI / 2, Math.PI * 1.5][leg.pair] || 0;
+        const amount = Math.min(1, speed * 0.35);
+        const yawDelta = -Math.cos(animPhase * 2 + pairPhase) * 0.4 * amount;
+        const rollDelta = Math.abs(Math.sin(animPhase + pairPhase) * 0.4) * amount;
+        const yaw = leg.yaw + yawDelta * (leg.side < 0 ? 1 : -1);
+        const roll = -(leg.roll + rollDelta * (leg.side < 0 ? 1 : -1));
+        let c = Math.cos(yaw), s = Math.sin(yaw);
+        const nextX = px * c - pz * s;
+        pz = px * s + pz * c;
+        px = nextX;
+        c = Math.cos(roll); s = Math.sin(roll);
+        const rolledX = px * c - py * s;
+        py = px * s + py * c;
+        px = rolledX;
+        lx = px + pivotX;
+        ly = py + pivotY;
+        lz = pz + pivotZ;
+        positionApplied = true;
+      }
       if (isLeg || isArm || isPlayerArm || isGolemArm || isTentacle) {
         const joint = part.joint || [0, part.s[1] / 2, 0];
         const pivotX = joint[0] / 16, pivotY = joint[1] / 16, pivotZ = joint[2] / 16;
@@ -2305,9 +2568,11 @@
         ly = px * s + py * c + pivotY;
         lx = nx + pivotX;
       }
-      lx += cx;
-      ly += cy;
-      lz += cz;
+      if (!positionApplied) {
+        lx += cx;
+        ly += cy;
+        lz += cz;
+      }
       if (part.anim === 'head') {
         const pivot = e.model.headPivot || part.c;
         const px = pivot[0] / 16, py = pivot[1] / 16, pz = pivot[2] / 16;
@@ -2387,6 +2652,18 @@
       out.inds.push(base, base + 1, base + 2, base, base + 2, base + 3);
       out.n += 4;
     }
+  }
+
+  function pushMinecart(out, rider, world, light) {
+    const cart = {
+      id: String(rider.id === undefined ? '' : rider.id) + ':minecart',
+      kind: 'minecart', model: MINECART_MODEL,
+      x: rider.x, y: rider.y, z: rider.z,
+      yaw: (rider.yaw || 0) + Math.PI / 2,
+      w: MINECART_MODEL.w, h: MINECART_MODEL.h,
+      age: rider.age || 0, animPhase: 0, animSpeed: 0, onGround: false,
+    };
+    for (const part of MINECART_MODEL.parts) pushBox(out, cart, part, world, 0, light);
   }
 
   function pushShadow(out, e, world) {
@@ -2483,41 +2760,71 @@
     }
   }
 
-  function pushRemoteHeldItem(out, e, world, light) {
-    const item = Items.get(e.held);
+  function pushExperienceOrb(out, e, camX, camZ) {
+    const size = 0.15;
+    const centerY = e.y + 0.23 + Math.sin(e.age * 3) * 0.04;
+    const dx = camX - e.x, dz = camZ - e.z;
+    const length = Math.hypot(dx, dz) || 1;
+    const rx = dz / length * size, rz = -dx / length * size;
+    const uv = Textures.uv('xp_orb');
+    const q = [[uv[0],uv[3]],[uv[2],uv[3]],[uv[2],uv[1]],[uv[0],uv[1]]];
+    const points = [
+      [e.x - rx, centerY - size, e.z - rz], [e.x + rx, centerY - size, e.z + rz],
+      [e.x + rx, centerY + size, e.z + rz], [e.x - rx, centerY + size, e.z - rz],
+    ];
+    let base = out.n;
+    for (let i = 0; i < 4; i++) out.verts.push(points[i][0], points[i][1], points[i][2], q[i][0], q[i][1], 1, 1);
+    out.inds.push(base, base + 1, base + 2, base, base + 2, base + 3); out.n += 4;
+    base = out.n;
+    for (let i = 3; i >= 0; i--) out.verts.push(points[i][0], points[i][1], points[i][2], q[3 - i][0], q[3 - i][1], 1, 1);
+    out.inds.push(base, base + 1, base + 2, base, base + 2, base + 3); out.n += 4;
+  }
+
+  function pushRemoteHeldItem(out, e, world, light, offhand) {
+    const id = offhand ? e.offhand : e.held;
+    const item = Items.get(id);
     if (!item) return;
     const tile = item.tex || (item.block && (() => {
-      const tex = Blocks.get(e.held).tex;
+      const tex = Blocks.get(id).tex;
       return tex.icon || tex.all || tex.front || tex.side || tex.top;
     })()) || 'stick';
     const heldKind = item.tool ? (item.tool.type === 'sword' ? 'sword' : 'tool')
-      : e.held === Items.IT.BOW ? 'bow'
+      : id === Items.IT.BOW ? 'bow'
+      : item.shield ? 'shield'
       : item.food ? 'food'
-      : e.held === Blocks.ID.TORCH ? 'torch'
+      : id === Blocks.ID.TORCH ? 'torch'
       : item.block ? 'block' : 'item';
     const display = item.display && item.display.thirdPerson ? item.display.thirdPerson : null;
-    const guard = U.clamp(e.blockBlend === undefined ? (e.blocking ? 1 : 0) : e.blockBlend, 0, 1);
-    const swing = remotePlayerArmSwing(e, true);
-    const handX = U.lerp(0.375, 0.10, guard);
+    const offhandItem = e.offhand ? Items.get(e.offhand) : null;
+    const shieldUsesOffhand = !!(offhandItem && offhandItem.shield);
+    const guard = item.shield && (!!offhand === shieldUsesOffhand)
+      ? U.clamp(e.blockBlend === undefined ? (e.blocking ? 1 : 0) : e.blockBlend, 0, 1) : 0;
+    const right = !offhand;
+    const side = right ? 1 : -1;
+    const swing = remotePlayerArmSwing(e, right);
+    const handX = side * U.lerp(0.375, 0.10, guard);
     const handY = 1.5 - Math.cos(swing) * 0.72;
     const handZ = -Math.sin(swing) * 0.72;
     const offset = display && display.offset ? display.offset : [0, 0.19, -0.025];
     const rotation = display && display.rotation ? display.rotation : [0, 0, 0];
-    let centerX = handX + offset[0] + U.lerp(0, -0.05, guard);
+    let centerX = handX + offset[0] * side + side * U.lerp(0, -0.05, guard);
     let centerY = handY + U.lerp(offset[1], Math.min(offset[1], 0.13), guard);
     let centerZ = handZ + offset[2];
     let half = display && Number.isFinite(display.scale) ? display.scale
-      : { sword:0.38, tool:0.36, bow:0.38, food:0.24, torch:0.31, item:0.25, block:0.20 }[heldKind];
+      : { sword:0.38, tool:0.36, bow:0.38, shield:0.43, food:0.24, torch:0.31, item:0.25, block:0.20 }[heldKind];
     let angle = Number.isFinite(rotation[2]) ? rotation[2]
-      : { sword:-0.58, tool:-0.48, bow:0.08, food:-0.18, torch:-0.10, item:0.02, block:0.10 }[heldKind];
-    if (heldKind === 'bow' && e.action === 'bow') { centerX -= 0.16; centerY += 0.18; centerZ -= 0.28; angle = -0.05; }
-    if (heldKind === 'food' && e.action === 'eat') { centerX -= 0.13; centerY += 0.28; centerZ -= 0.22; half *= 0.9; }
-    angle = U.lerp(angle, -0.34, guard);
+      : { sword:-0.58, tool:-0.48, bow:0.08, shield:-0.12, food:-0.18, torch:-0.10, item:0.02, block:0.10 }[heldKind];
+    angle *= side;
+    if (heldKind === 'shield' && guard > 0) { centerX += side * -0.17; centerY += 0.18; centerZ -= 0.20; angle = side * -0.04; }
+    if (!offhand && heldKind === 'bow' && e.action === 'bow') { centerX -= 0.16; centerY += 0.18; centerZ -= 0.28; angle = -0.05; }
+    if (!offhand && heldKind === 'food' && e.action === 'eat') { centerX -= 0.13; centerY += 0.28; centerZ -= 0.22; half *= 0.9; }
+    angle = U.lerp(angle, side * -0.34, guard);
     const armFollow = heldKind === 'food' ? 0.72 : heldKind === 'bow' ? 0.82 : 1;
-    const itemRotation = [(Number(rotation[0]) || 0) + swing * armFollow, Number(rotation[1]) || 0, angle];
+    const itemRotation = [(Number(rotation[0]) || 0) + swing * armFollow,
+      (Number(rotation[1]) || 0) * side, angle];
     const grip = display && display.grip ? display.grip : null;
     if (grip) {
-      const gripPoint = rotateItemPoint(grip[0] * half, grip[1] * half, grip[2] * half, itemRotation);
+      const gripPoint = rotateItemPoint(grip[0] * half * side, grip[1] * half, grip[2] * half, itemRotation);
       centerX -= gripPoint[0]; centerY -= gripPoint[1]; centerZ -= gripPoint[2];
     }
     const cyaw = Math.cos(e.yaw), syaw = Math.sin(e.yaw);
@@ -2534,7 +2841,7 @@
         corners[i * 3 + 1] = e.y + ly;
         corners[i * 3 + 2] = e.z + lx * syaw + lz * cyaw;
       }
-      const tiles = blockItemTiles(e.held);
+      const tiles = blockItemTiles(id);
       for (const face of ITEM_BOX_FACES) {
         pushTexturedFace(out, corners, face, Textures.uv(tiles[face.key]), sky, blk, face.shade);
       }
@@ -2593,8 +2900,9 @@
           e.held = Items.IT.BOW; e.action = 'bow'; e.actionPhase = 1;
           pushRemoteHeldItem(target, e, world, light);
         }
-      } else if (e.type === 'item' || e.type === 'arrow' || e.type === 'egg' || e.type === 'ender_pearl' || e.type === 'xp') {
-        if (e.type === 'xp') e.itemId = Items.IT.GLOWSTONE_DUST;
+      } else if (e.type === 'xp') {
+        pushExperienceOrb(normal, e, camX, camZ);
+      } else if (e.type === 'item' || e.type === 'arrow' || e.type === 'egg' || e.type === 'ender_pearl') {
         pushItemSprite(normal, e, world);
       } else if (e.type === 'tnt') {
         pushTNTBox(normal, e, world);
@@ -2629,10 +2937,17 @@
       const light = e._renderLight || (e._renderLight = [0, 0]);
       light[0] = world.getSky(Math.floor(e.x), Math.floor(e.y + e.h / 2), Math.floor(e.z)) / 15;
       light[1] = world.getBlkLight(Math.floor(e.x), Math.floor(e.y + e.h / 2), Math.floor(e.z)) / 15;
-      for (const part of e.model.parts) pushBox(normal, e, part, world, 0, light);
-      pushRemoteArmor(normal, glint, e, world, light);
-      pushEmbeddedArrows(normal, e, light);
-      if (e.held) pushRemoteHeldItem(normal, e, world, light);
+      const ridingMinecart = e.riding === 'minecart';
+      if (ridingMinecart) pushMinecart(normal, e, world, light);
+      const renderPlayer = ridingMinecart ? Object.assign({}, e, {
+        y: e.y + MINECART_RIDER_Y_OFFSET,
+        animSpeed: 0,
+      }) : e;
+      for (const part of e.model.parts) pushBox(normal, renderPlayer, part, world, 0, light);
+      pushRemoteArmor(normal, glint, renderPlayer, world, light);
+      pushEmbeddedArrows(normal, renderPlayer, light);
+      if (e.held) pushRemoteHeldItem(normal, renderPlayer, world, light, false);
+      if (e.offhand) pushRemoteHeldItem(normal, renderPlayer, world, light, true);
     }
     return {
       normal: finalizeWork(normal, 'normal'),
@@ -2906,7 +3221,10 @@
     renderVersion() { return geometryVersion; },
     particleRenderVersion() { return particleVersion; },
     refreshTextureAtlas() {
-      const modelChanged = setModelProfile('original');
+      const pack = Textures.currentPack ? Textures.currentPack() : 'default';
+      const modelChanged = setModelProfile(pack === 'original_1_12' ? 'original' : 'default');
+      PART_CACHE = new WeakMap();
+      prewarmResult = null;
       ITEM_SPRITE_CACHE.clear();
       if (!modelChanged) geometryVersion++;
       particleVersion++;
